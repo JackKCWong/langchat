@@ -35,6 +35,11 @@ for the full template:
 | `LANGCHAT_MODEL`    | yes      | Model name sent to `/chat/completions` (e.g. `gpt-4o-mini`, `deepseek-chat`, `llama3.1`).       |
 | `LANGCHAT_BASE_URL` | no       | Base URL of an OpenAI-compatible server. Leave unset for OpenAI; set for DeepSeek / Ollama / LM Studio / vLLM. |
 | `LANGCHAT_API_KEY`  | no       | Falls back to `OPENAI_API_KEY`. When neither is set, `langchat` warns and uses a placeholder so local servers work without auth. |
+| `LANGCHAT_TEMPERATURE` | no    | Sampling temperature. Overridden by `temperature:` in a file header.                             |
+| `LANGCHAT_TOP_P`    | no       | Top-p sampling. Overridden by `top_p:` in a file header.                                         |
+| `LANGCHAT_MAX_TOKENS` | no     | Max output tokens. Overridden by `max_tokens:` in a file header.                                 |
+| `LANGCHAT_TIMEOUT`  | no       | Request timeout in ms. Overridden by `timeout:` in a file header.                                |
+| `LANGCHAT_MAX_RETRIES` | no    | Retry count. Overridden by `max_retries:` in a file header.                                       |
 
 Quick examples:
 
@@ -93,6 +98,59 @@ Run it:
 ```bash
 langchat chat.md
 ```
+
+#### Metadata header
+
+A chat file may optionally begin with a `---`-delimited YAML-style header that
+declares per-file options. When present, the header is parsed and stripped from
+the body before the `# !<role>` blocks are read; error line numbers from the
+parser refer back to the original file.
+
+```markdown
+---
+model: qwen-vl-plus
+streaming: true
+temperature: 0.7
+max_tokens: 1024
+thinking: true
+---
+
+# !system
+You are a help assistant.
+
+# !user
+What is Sun Goku saying?
+```
+
+**Recognized keys** are mapped to `ChatOpenAI` constructor params:
+
+| Header key         | ChatOpenAI field           |
+| ------------------ | -------------------------- |
+| `model`            | `model`                    |
+| `streaming`        | `streaming`                |
+| `temperature`      | `temperature`              |
+| `top_p`            | `topP`                     |
+| `max_tokens`       | `maxTokens`                |
+| `stop`             | `stopSequences`            |
+| `presence_penalty` | `presencePenalty`          |
+| `frequency_penalty`| `frequencyPenalty`         |
+| `timeout`          | `timeout`                  |
+| `max_retries`      | `maxRetries`               |
+
+Any other key (e.g. `thinking`, `reasoning_effort`, `seed`) is forwarded to
+the API as a field in `modelKwargs`, so the same header works for vendor-
+specific extras like Anthropic / DeepSeek reasoning parameters.
+
+Values are parsed as scalars: strings (`foo` or `"foo bar"`), integers (`42`),
+floats (`0.7`), booleans (`true` / `false`), and `null` / `~`. Comments
+(`# ...`) and blank lines inside the header are ignored.
+
+**Precedence is CLI flag > header > env.** A `-m gpt-4o` flag overrides
+`model:` in the header, which in turn overrides `LANGCHAT_MODEL` in the
+environment. For the non-model options, the matching env vars are
+`LANGCHAT_TEMPERATURE`, `LANGCHAT_TOP_P`, `LANGCHAT_MAX_TOKENS`,
+`LANGCHAT_TIMEOUT`, and `LANGCHAT_MAX_RETRIES`. `streaming` is CLI/header
+only (no env var).
 
 ---
 
@@ -167,6 +225,10 @@ text. Image includes are only valid inside a `# !user` block.
 [`specs/mvp3/with_image_context.md`](specs/mvp3/with_image_context.md):
 
 ```markdown
+---
+model: qwen-vl-plus
+---
+
 # !system
 You are a help assistant.
 
@@ -181,6 +243,9 @@ What is Sun Goku saying?
 ```bash
 langchat specs/mvp3/with_image_context.md
 ```
+
+The leading `---` header pins the run to `qwen-vl-plus` so the example is
+reproducible without setting `LANGCHAT_MODEL` in the shell.
 
 (`specs/mvp3/Goku.png` is the referenced image.)
 

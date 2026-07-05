@@ -7,6 +7,7 @@ const { ChatOpenAI } = require('@langchain/openai');
 
 const { parseChatFile } = require('./parser.js');
 const { resolveIncludes } = require('./includes.js');
+const { parseFrontmatter } = require('./frontmatter.js');
 
 const USAGE = `Usage: langchat [options] <chat.md>
 
@@ -16,6 +17,11 @@ Options:
       --allow-include-escape  Permit {{ include }} paths outside the chat file's directory
   -h, --help                 Show this help and exit
 
+A chat file may begin with a "---" metadata header declaring per-file options
+such as "model: name", "streaming: true", "temperature: 0.7", "thinking: true",
+or any other key forwarded to the API as a request body field. Precedence is
+CLI flag > header > env. See README for the full key list.
+
 Use a "# !output" block containing a JSON Schema to constrain the response shape.
 When present, the model returns a parsed object which is pretty-printed as JSON.
 
@@ -23,6 +29,8 @@ Environment (auto-loaded from ./.env if present; existing env vars win):
   LANGCHAT_MODEL      Model name (required if -m/--model not given), e.g. gpt-4o-mini
   LANGCHAT_BASE_URL   OpenAI-compatible base URL (optional)
   LANGCHAT_API_KEY    API key (optional; falls back to OPENAI_API_KEY)
+  LANGCHAT_TEMPERATURE, LANGCHAT_TOP_P, LANGCHAT_MAX_TOKENS,
+  LANGCHAT_TIMEOUT, LANGCHAT_MAX_RETRIES
 `;
 
 function printUsage() {
@@ -79,12 +87,39 @@ function parseArgs(argv) {
   return opts;
 }
 
-function resolveConfig(overrides = {}) {
-  const model = overrides.model || process.env.LANGCHAT_MODEL;
+function readEnvNumber(name) {
+  const v = process.env[name];
+  if (v === undefined || v === '') return undefined;
+  const n = Number(v);
+  if (Number.isNaN(n)) {
+    throw new Error(
+      `env ${name}=${JSON.stringify(v)} is not a valid number`
+    );
+  }
+  return n;
+}
+
+const KNOWN_HEADER_FIELDS = [
+  { header: 'temperature', config: 'temperature', env: 'LANGCHAT_TEMPERATURE' },
+  { header: 'top_p', config: 'topP', env: 'LANGCHAT_TOP_P' },
+  { header: 'max_tokens', config: 'maxTokens', env: 'LANGCHAT_MAX_TOKENS' },
+  { header: 'timeout', config: 'timeout', env: 'LANGCHAT_TIMEOUT' },
+  { header: 'max_retries', config: 'maxRetries', env: 'LANGCHAT_MAX_RETRIES' },
+];
+
+const HEADER_TO_CONFIG = new Map(
+  KNOWN_HEADER_FIELDS.map((f) => [f.header, f.config])
+);
+
+function resolveConfig({ cliModel, cliStream, header } = {}) {
+  const h = header || {};
+
+  const model = cliModel || h.model || process.env.LANGCHAT_MODEL;
   if (!model) {
     throw new Error(
       'LANGCHAT_MODEL is required. Set it to the model name ' +
-        '(e.g. export LANGCHAT_MODEL=gpt-4o-mini) or pass -m/--model.'
+        '(e.g. export LANGCHAT_MODEL=gpt-4o-mini) or pass -m/--model, ' +
+        'or add "model: <name>" to a "---" header in the chat file.'
     );
   }
   const baseURL = process.env.LANGCHAT_BASE_URL || undefined;
@@ -104,12 +139,49 @@ function resolveConfig(overrides = {}) {
         'chat-completions model name like "gpt-4o-mini", "llama3.1", or "deepseek-chat".\n'
     );
   }
-  return { model, baseURL, apiKey };
+
+  const stream = cliStream === true || h.streaming === true;
+
+  const config = { model, baseURL, apiKey, stream };
+
+  for (const { config: cfgKey, env } of KNOWN_HEADER_FIELDS) {
+    const envVal = readEnvNumber(env);
+    if (envVal !== undefined) config[cfgKey] = envVal;
+  }
+
+  for (const [key, value] of Object.entries(h)) {
+    if (key === 'model' || key === 'streaming') continue;
+    if (value === undefined || value === null) continue;
+    const cfgKey = HEADER_TO_CONFIG.get(key) || key;
+    config[cfgKey] = value;
+  }
+
+  return config;
 }
 
 const RESPONSES_API_PREFERRED_MODEL_RE = /gpt-5\.[2-9]-pro|gpt-5\.[2-9]\.[2-9]-pro|codex/;
 
-function buildModel({ model, baseURL, apiKey, stream }) {
+const KNOWN_CONSTRUCTOR_FIELDS = new Set([
+  'temperature',
+  'topP',
+  'maxTokens',
+  'stopSequences',
+  'presencePenalty',
+  'frequencyPenalty',
+  'seed',
+  'timeout',
+  'maxRetries',
+]);
+
+const RESERVED_CONFIG_FIELDS = new Set([
+  'model',
+  'baseURL',
+  'apiKey',
+  'stream',
+]);
+
+function buildModel(config) {
+  const { model, baseURL, apiKey, stream } = config;
   const fields = { model };
   if (apiKey) fields.apiKey = apiKey;
   if (baseURL) {
@@ -122,7 +194,23 @@ function buildModel({ model, baseURL, apiKey, stream }) {
   // which has a different streaming protocol and breaks `-s` for users
   // hitting an OpenAI-compatible /chat/completions server.
   fields.useResponsesApi = false;
-  return new ChatOpenAI(fields);
+
+  const modelKwargs = {};
+  for (const [key, value] of Object.entries(config)) {
+    if (RESERVED_CONFIG_FIELDS.has(key)) continue;
+    if (value === undefined) continue;
+    if (KNOWN_CONSTRUCTOR_FIELDS.has(key)) {
+      fields[key] = value;
+    } else {
+      modelKwargs[key] = value;
+    }
+  }
+  if (Object.keys(modelKwargs).length > 0) {
+    fields.modelKwargs = modelKwargs;
+  }
+  const instance = new ChatOpenAI(fields);
+  instance._langchatConfig = config;
+  return instance;
 }
 
 function stringifyContent(content) {
@@ -190,9 +278,11 @@ async function runStructured(baseModel, messages, outputSchema, { stream }) {
   }
   if (effectiveStream !== baseModel.streaming) {
     model = buildModel({
-      model: baseModel.model,
-      baseURL: baseModel.configuration?.baseURL,
-      apiKey: baseModel.apiKey,
+      ...(baseModel._langchatConfig || {
+        model: baseModel.model,
+        baseURL: baseModel.configuration?.baseURL,
+        apiKey: baseModel.apiKey,
+      }),
       stream: effectiveStream,
     });
   }
@@ -231,9 +321,18 @@ async function main(argv) {
     process.exit(1);
   }
 
+  let frontmatter;
+  try {
+    frontmatter = parseFrontmatter(text);
+  } catch (err) {
+    process.stderr.write(`langchat: failed to parse frontmatter in ${opts.file}: ${err.message}\n`);
+    process.exit(1);
+  }
+  const { body, opts: headerOpts, headerLines } = frontmatter;
+
   let expanded;
   try {
-    expanded = resolveIncludes(text, {
+    expanded = resolveIncludes(body, {
       baseDir: path.dirname(absPath),
       allowEscape: opts.allowIncludeEscape,
     });
@@ -244,7 +343,9 @@ async function main(argv) {
 
   let parsed;
   try {
-    parsed = parseChatFile(expanded.text, expanded.attachments);
+    parsed = parseChatFile(expanded.text, expanded.attachments, {
+      lineOffset: headerLines,
+    });
   } catch (err) {
     process.stderr.write(`langchat: failed to parse ${opts.file}: ${err.message}\n`);
     process.exit(1);
@@ -253,13 +354,17 @@ async function main(argv) {
 
   let config;
   try {
-    config = resolveConfig({ model: opts.model });
+    config = resolveConfig({
+      cliModel: opts.model,
+      cliStream: opts.stream,
+      header: headerOpts,
+    });
   } catch (err) {
     process.stderr.write(`langchat: ${err.message}\n`);
     process.exit(2);
   }
 
-  const model = buildModel({ ...config, stream: opts.stream });
+  const model = buildModel(config);
 
   try {
     if (outputSchema) {
@@ -280,4 +385,14 @@ async function main(argv) {
   }
 }
 
-module.exports = { main, parseArgs, runOnce, runStreamed, runStructured };
+module.exports = {
+  main,
+  parseArgs,
+  runOnce,
+  runStreamed,
+  runStructured,
+  resolveConfig,
+  buildModel,
+  readEnvNumber,
+  KNOWN_HEADER_FIELDS,
+};

@@ -79,12 +79,16 @@ function expandUserContent(rawText, attachments, role, lineNumber, startIdx) {
   return { content: blocks, nextIdx: idx };
 }
 
-function parseChatFile(text, attachments = []) {
+function parseChatFile(text, attachments = [], opts = {}) {
   if (typeof text !== 'string') {
     throw new TypeError('parseChatFile expects a string');
   }
   if (!Array.isArray(attachments)) {
     throw new TypeError('parseChatFile attachments must be an array');
+  }
+  const lineOffset = Number.isFinite(opts.lineOffset) ? opts.lineOffset : 0;
+  if (lineOffset < 0) {
+    throw new RangeError('parseChatFile lineOffset must be >= 0');
   }
 
   const lines = text.split(/\r?\n/);
@@ -136,7 +140,7 @@ function parseChatFile(text, attachments = []) {
   };
 
   lines.forEach((line, idx) => {
-    const lineNumber = idx + 1;
+    const lineNumber = idx + 1 + lineOffset;
     const match = line.match(HEADER_RE);
     if (match) {
       flush();
@@ -152,6 +156,7 @@ function parseChatFile(text, attachments = []) {
       );
     }
     if (currentRole === null) {
+      if (line.trim() === '') return;
       throw new Error(
         `Unexpected content at line ${lineNumber}: ` +
           `messages must begin with a "# !<role>" header.`

@@ -1,3 +1,7 @@
+---
+model: qwen-vl-plus
+---
+
 # !system
 
 You are a help assistant.
