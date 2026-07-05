@@ -14,13 +14,15 @@ const USAGE = `Usage: langchat [options] <chat.md>
 Options:
   -m, --model <name>         Model name (overrides LANGCHAT_MODEL)
   -s, --stream               Stream the response token-by-token to stdout
+  -o, --output <path>        Write the response to <path> as well as stdout
       --allow-include-escape  Permit {{ include }} paths outside the chat file's directory
   -h, --help                 Show this help and exit
 
 A chat file may begin with a "---" metadata header declaring per-file options
 such as "model: name", "streaming: true", "temperature: 0.7", "thinking: true",
-or any other key forwarded to the API as a request body field. Precedence is
-CLI flag > header > env. See README for the full key list.
+"output: path/to/file.md", or any other key forwarded to the API as a request
+body field. Precedence is CLI flag > header > env. See README for the full key
+list.
 
 Use a "# !output" block containing a JSON Schema to constrain the response shape.
 When present, the model returns a parsed object which is pretty-printed as JSON.
@@ -55,6 +57,7 @@ function parseArgs(argv) {
     help: false,
     allowIncludeEscape: false,
     model: null,
+    output: null,
   };
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
@@ -71,6 +74,12 @@ function parseArgs(argv) {
         throw new Error(`Option ${a} requires a model name.`);
       }
       opts.model = value;
+    } else if (a === '-o' || a === '--output') {
+      const value = argv[++i];
+      if (value === undefined || value.startsWith('-')) {
+        throw new Error(`Option ${a} requires an output path.`);
+      }
+      opts.output = value;
     } else if (a === '--') {
       positional.push(...argv.slice(i + 1));
       break;
@@ -232,8 +241,13 @@ async function runOnce(model, messages) {
     : stringifyContent(aiMessage.content);
 }
 
-function createLineWriter() {
+function createLineWriter(fileStream = null) {
   let buffer = '';
+  const flushLine = (line) => {
+    const text = line + '\n';
+    if (fileStream) fileStream.write(text);
+    process.stdout.write(text);
+  };
   return {
     write(text) {
       if (!text) return;
@@ -242,11 +256,12 @@ function createLineWriter() {
       while ((nl = buffer.indexOf('\n')) !== -1) {
         const line = buffer.slice(0, nl);
         buffer = buffer.slice(nl + 1);
-        process.stdout.write(line + '\n');
+        flushLine(line);
       }
     },
     end() {
       if (buffer.length > 0) {
+        if (fileStream) fileStream.write(buffer);
         process.stdout.write(buffer);
         buffer = '';
       }
@@ -254,9 +269,9 @@ function createLineWriter() {
   };
 }
 
-async function runStreamed(model, messages) {
+async function runStreamed(model, messages, { fileStream } = {}) {
   const streamIter = await model.stream(messages);
-  const writer = createLineWriter();
+  const writer = createLineWriter(fileStream);
   try {
     for await (const chunk of streamIter) {
       const piece = stringifyContent(chunk.content);
@@ -265,6 +280,57 @@ async function runStreamed(model, messages) {
   } finally {
     writer.end();
   }
+}
+
+function resolveOutputPath({ cliOutput, header } = {}) {
+  let raw;
+  if (cliOutput !== undefined && cliOutput !== null && cliOutput !== '') {
+    raw = cliOutput;
+  } else if (
+    header &&
+    header.output !== undefined &&
+    header.output !== null &&
+    header.output !== ''
+  ) {
+    raw = header.output;
+  } else {
+    return null;
+  }
+  if (typeof raw !== 'string') {
+    throw new Error(
+      `header "output" must be a string path, got ${typeof raw}`
+    );
+  }
+  return path.resolve(raw);
+}
+
+function ensureOutputDir(outputPath) {
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+}
+
+function openOutputStream(outputPath) {
+  try {
+    ensureOutputDir(outputPath);
+    return fs.createWriteStream(outputPath, { flags: 'w' });
+  } catch (err) {
+    process.stderr.write(`langchat: cannot open ${outputPath}: ${err.message}\n`);
+    process.exit(1);
+  }
+}
+
+function writeResponse(text, outputPath) {
+  if (outputPath) {
+    try {
+      ensureOutputDir(outputPath);
+      fs.writeFileSync(outputPath, text);
+    } catch (err) {
+      process.stderr.write(
+        `langchat: cannot write to ${outputPath}: ${err.message}\n`
+      );
+      process.exit(1);
+    }
+  }
+  process.stdout.write(text);
 }
 
 async function runStructured(baseModel, messages, outputSchema, { stream }) {
@@ -364,6 +430,14 @@ async function main(argv) {
     process.exit(2);
   }
 
+  let outputPath;
+  try {
+    outputPath = resolveOutputPath({ cliOutput: opts.output, header: headerOpts });
+  } catch (err) {
+    process.stderr.write(`langchat: ${err.message}\n`);
+    process.exit(2);
+  }
+
   const model = buildModel(config);
 
   try {
@@ -371,13 +445,20 @@ async function main(argv) {
       const result = await runStructured(model, messages, outputSchema, {
         stream: opts.stream,
       });
-      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+      writeResponse(JSON.stringify(result, null, 2) + '\n', outputPath);
     } else if (opts.stream) {
-      await runStreamed(model, messages);
-      process.stdout.write('\n');
+      const fileStream = outputPath ? openOutputStream(outputPath) : null;
+      try {
+        await runStreamed(model, messages, { fileStream });
+        if (fileStream) fileStream.write('\n');
+        process.stdout.write('\n');
+      } finally {
+        if (fileStream) fileStream.end();
+      }
     } else {
       const reply = await runOnce(model, messages);
-      process.stdout.write(reply.endsWith('\n') ? reply : reply + '\n');
+      const text = reply.endsWith('\n') ? reply : reply + '\n';
+      writeResponse(text, outputPath);
     }
   } catch (err) {
     process.stderr.write(`langchat: request failed: ${err.message}\n`);
@@ -394,5 +475,9 @@ module.exports = {
   resolveConfig,
   buildModel,
   readEnvNumber,
+  resolveOutputPath,
+  writeResponse,
+  openOutputStream,
+  createLineWriter,
   KNOWN_HEADER_FIELDS,
 };

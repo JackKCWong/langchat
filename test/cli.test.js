@@ -2,8 +2,16 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
-const { parseArgs } = require('../src/cli.js');
+const {
+  parseArgs,
+  resolveOutputPath,
+  writeResponse,
+  createLineWriter,
+} = require('../src/cli.js');
 
 test('empty argv returns no file, no flags', () => {
   const opts = parseArgs([]);
@@ -157,6 +165,57 @@ test('-m combined with -s and a file', () => {
   assert.equal(opts.stream, true);
   assert.equal(opts.model, 'gpt-4o');
   assert.equal(opts.file, 'chat.md');
+});
+
+test('--output defaults to null', () => {
+  const opts = parseArgs(['chat.md']);
+  assert.equal(opts.output, null);
+});
+
+test('-o sets the output path', () => {
+  const opts = parseArgs(['-o', 'out.md', 'chat.md']);
+  assert.equal(opts.output, 'out.md');
+  assert.equal(opts.file, 'chat.md');
+});
+
+test('--output sets the output path', () => {
+  const opts = parseArgs(['--output', 'results/reply.md', 'chat.md']);
+  assert.equal(opts.output, 'results/reply.md');
+});
+
+test('-o works after the file (order does not matter)', () => {
+  const opts = parseArgs(['chat.md', '-o', 'reply.md']);
+  assert.equal(opts.output, 'reply.md');
+  assert.equal(opts.file, 'chat.md');
+});
+
+test('-o combined with -s and -m', () => {
+  const opts = parseArgs(['-s', '-m', 'gpt-4o', '-o', 'reply.md', 'chat.md']);
+  assert.equal(opts.stream, true);
+  assert.equal(opts.model, 'gpt-4o');
+  assert.equal(opts.output, 'reply.md');
+  assert.equal(opts.file, 'chat.md');
+});
+
+test('-o without a value throws', () => {
+  assert.throws(() => parseArgs(['-o']), /requires an output path/);
+});
+
+test('--output without a value throws', () => {
+  assert.throws(() => parseArgs(['--output']), /requires an output path/);
+});
+
+test('-o with a flag-shaped value throws', () => {
+  assert.throws(
+    () => parseArgs(['-o', '-s']),
+    /requires an output path/
+  );
+});
+
+test('-- makes a flag-shaped output path a positional file', () => {
+  const opts = parseArgs(['--', '-o']);
+  assert.equal(opts.file, '-o');
+  assert.equal(opts.output, null);
 });
 
 const {
@@ -377,3 +436,145 @@ test('buildModel: attaches original config for structured-output rebuild', () =>
   const m = buildModel(cfg);
   assert.equal(m._langchatConfig, cfg);
 });
+
+function tmpdir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'langchat-test-'));
+}
+
+test('resolveOutputPath: returns null when neither flag nor header set', () => {
+  assert.equal(resolveOutputPath({}), null);
+  assert.equal(resolveOutputPath({ header: {} }), null);
+  assert.equal(resolveOutputPath({ header: { output: '' } }), null);
+});
+
+test('resolveOutputPath: CLI flag wins over header', () => {
+  const resolved = resolveOutputPath({
+    cliOutput: 'cli.md',
+    header: { output: 'hdr.md' },
+  });
+  assert.equal(resolved, path.resolve('cli.md'));
+});
+
+test('resolveOutputPath: falls back to header when CLI is absent', () => {
+  const resolved = resolveOutputPath({ header: { output: 'hdr.md' } });
+  assert.equal(resolved, path.resolve('hdr.md'));
+});
+
+test('resolveOutputPath: resolves relative paths against cwd', () => {
+  const resolved = resolveOutputPath({ cliOutput: 'out/reply.md' });
+  assert.equal(resolved, path.resolve('out/reply.md'));
+});
+
+test('resolveOutputPath: rejects non-string header value', () => {
+  assert.throws(
+    () => resolveOutputPath({ header: { output: 42 } }),
+    /header "output" must be a string path/
+  );
+});
+
+test('writeResponse: writes to file and mirrors to stdout', () => {
+  const dir = tmpdir();
+  const file = path.join(dir, 'out.md');
+  const restore = captureStdout();
+  try {
+    writeResponse('hello world\n', file);
+    assert.equal(restore.captured(), 'hello world\n');
+    assert.equal(fs.readFileSync(file, 'utf8'), 'hello world\n');
+  } finally {
+    restore.restore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('writeResponse: with null outputPath only writes to stdout', () => {
+  const restore = captureStdout();
+  try {
+    writeResponse('just stdout\n', null);
+    assert.equal(restore.captured(), 'just stdout\n');
+  } finally {
+    restore.restore();
+  }
+});
+
+test('writeResponse: creates missing parent directories', () => {
+  const dir = tmpdir();
+  const file = path.join(dir, 'nested', 'deep', 'out.md');
+  const restore = captureStdout();
+  try {
+    writeResponse('nested\n', file);
+    assert.equal(fs.readFileSync(file, 'utf8'), 'nested\n');
+  } finally {
+    restore.restore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('writeResponse: overwrites existing file', () => {
+  const dir = tmpdir();
+  const file = path.join(dir, 'out.md');
+  fs.writeFileSync(file, 'old content');
+  const restore = captureStdout();
+  try {
+    writeResponse('new content\n', file);
+    assert.equal(fs.readFileSync(file, 'utf8'), 'new content\n');
+  } finally {
+    restore.restore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('createLineWriter: without a fileStream, only writes to stdout', () => {
+  const restore = captureStdout();
+  try {
+    const writer = createLineWriter();
+    writer.write('line one\nline two');
+    writer.write(' continued\n');
+    writer.end();
+    assert.equal(restore.captured(), 'line one\nline two continued\n');
+  } finally {
+    restore.restore();
+  }
+});
+
+test('createLineWriter: with a fileStream, writes to both file and stdout', () => {
+  const dir = tmpdir();
+  const file = path.join(dir, 'streamed.md');
+  const chunks = [];
+  const fakeStream = {
+    write(text) {
+      chunks.push(text);
+    },
+  };
+  const restore = captureStdout();
+  try {
+    const writer = createLineWriter(fakeStream);
+    writer.write('first line\n');
+    writer.write('partial ');
+    writer.write('rest\n');
+    writer.end();
+    assert.equal(restore.captured(), 'first line\npartial rest\n');
+    assert.deepEqual(chunks, ['first line\n', 'partial rest\n']);
+    fs.writeFileSync(file, chunks.join(''));
+    assert.equal(fs.readFileSync(file, 'utf8'), 'first line\npartial rest\n');
+  } finally {
+    restore.restore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function captureStdout() {
+  const chunks = [];
+  const origWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = (chunk, ...rest) => {
+    chunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+    return true;
+  };
+  return {
+    captured() {
+      return chunks.join('');
+    },
+    restore() {
+      process.stdout.write = origWrite;
+    },
+  };
+}

@@ -74,6 +74,7 @@ langchat [options] <chat.md>
 Options:
   -m, --model <name>         Model name (overrides LANGCHAT_MODEL)
   -s, --stream               Stream the response token-by-token to stdout
+  -o, --output <path>        Write the response to <path> as well as stdout
       --allow-include-escape  Permit {{ include }} paths outside the chat file's directory
   -h, --help                 Show this help and exit
 ```
@@ -121,6 +122,9 @@ You are a help assistant.
 # !user
 What is Sun Goku saying?
 ```
+
+The header also accepts `output:` to write the response to a file (see
+[Writing the response to a file](#writing-the-response-to-a-file) below).
 
 **Recognized keys** are mapped to `ChatOpenAI` constructor params:
 
@@ -293,6 +297,34 @@ langchat specs/mvp4/with_structured_output.md
 
 The model's reply is parsed against the schema and printed as JSON.
 
+### Writing the response to a file
+
+Pass `-o <path>` (or `--output <path>`) to write the response to a file in
+addition to stdout. The response is always mirrored to stdout so you can watch
+the run interactively; the file just gets a copy. The flag works with plain
+text replies, streaming (`-s`), and structured `# !output` results.
+
+```bash
+langchat -o reply.md chat.md
+langchat -s -o reply.md chat.md       # writes each completed line to reply.md
+langchat -o nested/dir/out.md chat.md # creates missing parent dirs (mkdir -p)
+```
+
+You can also pin the destination per chat file via the frontmatter header:
+
+```markdown
+---
+output: results/reply.md
+---
+
+# !system
+...
+```
+
+**Precedence is CLI flag > header > (stdout only).** If both `-o` and `output:`
+are set, the CLI flag wins. The file is overwritten on each run; missing parent
+directories are created automatically.
+
 ---
 
 ## Options reference
@@ -301,6 +333,7 @@ The model's reply is parsed against the schema and printed as JSON.
 | -------------------------- | --------------------------------------------------------------------------------------------------- |
 | `-m, --model <name>`       | Override `LANGCHAT_MODEL` for this invocation only.                                                 |
 | `-s, --stream`             | Stream the response token-by-token to stdout. Automatically disabled when a `# !output` schema is present. |
+| `-o, --output <path>`      | Write the response to `<path>` as well as stdout. Creates parent dirs if missing; overwrites existing files. |
 | `--allow-include-escape`   | Permit `{{ include "..." }}` paths to escape the chat file's directory. Default is to sandbox them. |
 | `-h, --help`               | Print the usage banner and exit.                                                                    |
 
