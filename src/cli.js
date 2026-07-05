@@ -11,6 +11,7 @@ const { resolveIncludes } = require('./includes.js');
 const USAGE = `Usage: langchat [options] <chat.md>
 
 Options:
+  -m, --model <name>         Model name (overrides LANGCHAT_MODEL)
   -s, --stream               Stream the response token-by-token to stdout
       --allow-include-escape  Permit {{ include }} paths outside the chat file's directory
   -h, --help                 Show this help and exit
@@ -19,7 +20,7 @@ Use a "#!output" block containing a JSON Schema to constrain the response shape.
 When present, the model returns a parsed object which is pretty-printed as JSON.
 
 Environment (auto-loaded from ./.env if present; existing env vars win):
-  LANGCHAT_MODEL      Model name (required), e.g. gpt-4o-mini
+  LANGCHAT_MODEL      Model name (required if -m/--model not given), e.g. gpt-4o-mini
   LANGCHAT_BASE_URL   OpenAI-compatible base URL (optional)
   LANGCHAT_API_KEY    API key (optional; falls back to OPENAI_API_KEY)
 `;
@@ -40,7 +41,13 @@ function loadDotenv() {
 }
 
 function parseArgs(argv) {
-  const opts = { stream: false, file: null, help: false, allowIncludeEscape: false };
+  const opts = {
+    stream: false,
+    file: null,
+    help: false,
+    allowIncludeEscape: false,
+    model: null,
+  };
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -50,6 +57,12 @@ function parseArgs(argv) {
       opts.stream = true;
     } else if (a === '--allow-include-escape') {
       opts.allowIncludeEscape = true;
+    } else if (a === '-m' || a === '--model') {
+      const value = argv[++i];
+      if (value === undefined || value.startsWith('-')) {
+        throw new Error(`Option ${a} requires a model name.`);
+      }
+      opts.model = value;
     } else if (a === '--') {
       positional.push(...argv.slice(i + 1));
       break;
@@ -66,12 +79,12 @@ function parseArgs(argv) {
   return opts;
 }
 
-function resolveConfig() {
-  const model = process.env.LANGCHAT_MODEL;
+function resolveConfig(overrides = {}) {
+  const model = overrides.model || process.env.LANGCHAT_MODEL;
   if (!model) {
     throw new Error(
       'LANGCHAT_MODEL is required. Set it to the model name ' +
-        '(e.g. export LANGCHAT_MODEL=gpt-4o-mini).'
+        '(e.g. export LANGCHAT_MODEL=gpt-4o-mini) or pass -m/--model.'
     );
   }
   const baseURL = process.env.LANGCHAT_BASE_URL || undefined;
@@ -240,7 +253,7 @@ async function main(argv) {
 
   let config;
   try {
-    config = resolveConfig();
+    config = resolveConfig({ model: opts.model });
   } catch (err) {
     process.stderr.write(`langchat: ${err.message}\n`);
     process.exit(2);

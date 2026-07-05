@@ -116,3 +116,45 @@ test('--allow-include-escape works with -s', () => {
   assert.equal(opts.stream, true);
   assert.equal(opts.allowIncludeEscape, true);
 });
+
+test('--model defaults to null', () => {
+  const opts = parseArgs(['chat.md']);
+  assert.equal(opts.model, null);
+});
+
+test('-m sets the model', () => {
+  const opts = parseArgs(['-m', 'gpt-4o-mini', 'chat.md']);
+  assert.equal(opts.model, 'gpt-4o-mini');
+  assert.equal(opts.file, 'chat.md');
+});
+
+test('--model sets the model', () => {
+  const opts = parseArgs(['--model', 'llama3.1', 'chat.md']);
+  assert.equal(opts.model, 'llama3.1');
+  assert.equal(opts.file, 'chat.md');
+});
+
+test('-m works after the file (order does not matter)', () => {
+  const opts = parseArgs(['chat.md', '-m', 'deepseek-chat']);
+  assert.equal(opts.model, 'deepseek-chat');
+  assert.equal(opts.file, 'chat.md');
+});
+
+test('-m without a value throws', () => {
+  assert.throws(() => parseArgs(['-m']), /requires a model name/);
+});
+
+test('--model without a value throws', () => {
+  assert.throws(() => parseArgs(['--model']), /requires a model name/);
+});
+
+test('--model with a flag-shaped value throws', () => {
+  assert.throws(() => parseArgs(['--model', '-s']), /requires a model name/);
+});
+
+test('-m combined with -s and a file', () => {
+  const opts = parseArgs(['-s', '-m', 'gpt-4o', 'chat.md']);
+  assert.equal(opts.stream, true);
+  assert.equal(opts.model, 'gpt-4o');
+  assert.equal(opts.file, 'chat.md');
+});
