@@ -1,5 +1,5 @@
 ---
-model: qwen-vl-plus
+model: qwen3-vl-plus
 ---
 
 # !system

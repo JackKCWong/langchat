@@ -17,6 +17,8 @@ Options:
   -o, --output <path>        Write the response to <path> as well as stdout
   -d, --debug                Write {{ patchify }} tiles next to each source image
       --allow-include-escape  Permit {{ include }} paths outside the chat file's directory
+  -t, --thinking <yes|no>    Print thinking tokens dimmed to stdout (yes) or
+                             omit them entirely (no). Precedence: flag > header.
   -h, --help                 Show this help and exit
 
 A chat file may begin with a "---" metadata header declaring per-file options
@@ -51,6 +53,18 @@ function loadDotenv() {
   }
 }
 
+function parseThinkingValue(raw, flag) {
+  if (raw === undefined || raw === null) {
+    throw new Error(`Option ${flag} requires a value (yes or no).`);
+  }
+  const v = String(raw).trim().toLowerCase();
+  if (v === 'yes' || v === 'true' || v === '1' || v === 'on') return true;
+  if (v === 'no' || v === 'false' || v === '0' || v === 'off') return false;
+  throw new Error(
+    `Option ${flag} expects yes or no (got ${JSON.stringify(raw)}).`
+  );
+}
+
 function parseArgs(argv) {
   const opts = {
     stream: false,
@@ -60,8 +74,19 @@ function parseArgs(argv) {
     model: null,
     output: null,
     debug: false,
+    thinking: null,
   };
   const positional = [];
+  const takeThinkingValue = (argv, i, flag) => {
+    if (i + 1 >= argv.length) {
+      throw new Error(`Option ${flag} requires a value (yes or no).`);
+    }
+    const value = argv[i + 1];
+    if (value === undefined || value.startsWith('-')) {
+      throw new Error(`Option ${flag} requires a value (yes or no).`);
+    }
+    return { value, consumed: 2 };
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '-h' || a === '--help') {
@@ -84,6 +109,21 @@ function parseArgs(argv) {
         throw new Error(`Option ${a} requires an output path.`);
       }
       opts.output = value;
+    } else if (a === '-t' || a.startsWith('--thinking')) {
+      let value;
+      if (a === '-t' || a === '--thinking') {
+        const got = takeThinkingValue(argv, i, a);
+        value = got.value;
+        i += got.consumed - 1;
+      } else if (a.startsWith('--thinking=')) {
+        value = a.slice('--thinking='.length);
+        if (value === '') {
+          throw new Error(`Option ${a} requires a value (yes or no).`);
+        }
+      } else {
+        throw new Error(`Unknown option: ${a}`);
+      }
+      opts.thinking = parseThinkingValue(value, '-t/--thinking');
     } else if (a === '--') {
       positional.push(...argv.slice(i + 1));
       break;
@@ -124,7 +164,7 @@ const HEADER_TO_CONFIG = new Map(
   KNOWN_HEADER_FIELDS.map((f) => [f.header, f.config])
 );
 
-function resolveConfig({ cliModel, cliStream, header } = {}) {
+function resolveConfig({ cliModel, cliStream, cliThinking = null, header } = {}) {
   const h = header || {};
 
   const model = cliModel || h.model || process.env.LANGCHAT_MODEL;
@@ -165,8 +205,15 @@ function resolveConfig({ cliModel, cliStream, header } = {}) {
   for (const [key, value] of Object.entries(h)) {
     if (key === 'model' || key === 'streaming') continue;
     if (value === undefined || value === null) continue;
+    if (key === 'thinking') continue;
     const cfgKey = HEADER_TO_CONFIG.get(key) || key;
     config[cfgKey] = value;
+  }
+
+  if (cliThinking === true || cliThinking === false) {
+    config.thinking = cliThinking;
+  } else if (h && h.thinking !== undefined && h.thinking !== null) {
+    config.thinking = h.thinking;
   }
 
   return config;
@@ -238,19 +285,64 @@ function stringifyContent(content) {
   return out;
 }
 
-async function runOnce(model, messages) {
-  const aiMessage = await model.invoke(messages);
-  return typeof aiMessage.text === 'string'
-    ? aiMessage.text
-    : stringifyContent(aiMessage.content);
+function extractThinking(messageLike) {
+  let reasoning = '';
+  let main = '';
+  if (!messageLike || typeof messageLike !== 'object') {
+    return { reasoning, main };
+  }
+  const kwargs = messageLike.additional_kwargs || {};
+  if (typeof kwargs.reasoning_content === 'string') {
+    reasoning += kwargs.reasoning_content;
+  }
+  const content = messageLike.content;
+  if (typeof content === 'string') {
+    main += content;
+  } else if (Array.isArray(content)) {
+    for (const block of content) {
+      if (!block || typeof block !== 'object') continue;
+      const type = block.type;
+      if (type === 'thinking' || type === 'reasoning') {
+        const text =
+          typeof block.text === 'string'
+            ? block.text
+            : typeof block.reasoning === 'string'
+            ? block.reasoning
+            : '';
+        reasoning += text;
+      } else if (type === 'text') {
+        main += block.text || '';
+      }
+    }
+  }
+  return { reasoning, main };
 }
 
-function createLineWriter(fileStream = null) {
+async function runOnce(model, messages, { thinking = null } = {}) {
+  const aiMessage = await model.invoke(messages);
+  const main =
+    typeof aiMessage.text === 'string'
+      ? aiMessage.text
+      : stringifyContent(aiMessage.content);
+  if (thinking === true) {
+    const { reasoning } = extractThinking(aiMessage);
+    if (reasoning) {
+      process.stdout.write('\x1b[2m' + reasoning + '\x1b[0m\n');
+    }
+  }
+  return main;
+}
+
+function createLineWriter(fileStream = null, { dim = false } = {}) {
   let buffer = '';
   const flushLine = (line) => {
     const text = line + '\n';
     if (fileStream) fileStream.write(text);
-    process.stdout.write(text);
+    if (dim) {
+      process.stdout.write('\x1b[2m' + text + '\x1b[0m');
+    } else {
+      process.stdout.write(text);
+    }
   };
   return {
     write(text) {
@@ -266,22 +358,29 @@ function createLineWriter(fileStream = null) {
     end() {
       if (buffer.length > 0) {
         if (fileStream) fileStream.write(buffer);
-        process.stdout.write(buffer);
+        if (dim) {
+          process.stdout.write('\x1b[2m' + buffer + '\x1b[0m');
+        } else {
+          process.stdout.write(buffer);
+        }
         buffer = '';
       }
     },
   };
 }
 
-async function runStreamed(model, messages, { fileStream } = {}) {
+async function runStreamed(model, messages, { fileStream, thinking = null } = {}) {
   const streamIter = await model.stream(messages);
+  const thinkingWriter = thinking === true ? createLineWriter(null, { dim: true }) : null;
   const writer = createLineWriter(fileStream);
   try {
     for await (const chunk of streamIter) {
-      const piece = stringifyContent(chunk.content);
-      writer.write(piece);
+      const { reasoning, main } = extractThinking(chunk);
+      if (thinkingWriter && reasoning) thinkingWriter.write(reasoning);
+      if (main) writer.write(main);
     }
   } finally {
+    if (thinkingWriter) thinkingWriter.end();
     writer.end();
   }
 }
@@ -337,7 +436,7 @@ function writeResponse(text, outputPath) {
   process.stdout.write(text);
 }
 
-async function runStructured(baseModel, messages, outputSchema, { stream }) {
+async function runStructured(baseModel, messages, outputSchema, { stream, thinking = null } = {}) {
   let model = baseModel;
   let effectiveStream = stream;
   if (stream) {
@@ -357,7 +456,14 @@ async function runStructured(baseModel, messages, outputSchema, { stream }) {
     });
   }
   const structured = model.withStructuredOutput(outputSchema);
-  return await structured.invoke(messages);
+  const aiMessage = await structured.invoke(messages);
+  if (thinking === true && aiMessage && typeof aiMessage === 'object') {
+    const { reasoning } = extractThinking(aiMessage);
+    if (reasoning) {
+      process.stdout.write('\x1b[2m' + reasoning + '\x1b[0m\n');
+    }
+  }
+  return aiMessage;
 }
 
 async function main(argv) {
@@ -428,6 +534,7 @@ async function main(argv) {
     config = resolveConfig({
       cliModel: opts.model,
       cliStream: opts.stream,
+      cliThinking: opts.thinking,
       header: headerOpts,
     });
   } catch (err) {
@@ -449,19 +556,23 @@ async function main(argv) {
     if (outputSchema) {
       const result = await runStructured(model, messages, outputSchema, {
         stream: opts.stream,
+        thinking: opts.thinking,
       });
       writeResponse(JSON.stringify(result, null, 2) + '\n', outputPath);
     } else if (opts.stream) {
       const fileStream = outputPath ? openOutputStream(outputPath) : null;
       try {
-        await runStreamed(model, messages, { fileStream });
+        await runStreamed(model, messages, {
+          fileStream,
+          thinking: opts.thinking,
+        });
         if (fileStream) fileStream.write('\n');
         process.stdout.write('\n');
       } finally {
         if (fileStream) fileStream.end();
       }
     } else {
-      const reply = await runOnce(model, messages);
+      const reply = await runOnce(model, messages, { thinking: opts.thinking });
       const text = reply.endsWith('\n') ? reply : reply + '\n';
       writeResponse(text, outputPath);
     }
@@ -474,6 +585,7 @@ async function main(argv) {
 module.exports = {
   main,
   parseArgs,
+  parseThinkingValue,
   runOnce,
   runStreamed,
   runStructured,
@@ -484,5 +596,7 @@ module.exports = {
   writeResponse,
   openOutputStream,
   createLineWriter,
+  extractThinking,
+  stringifyContent,
   KNOWN_HEADER_FIELDS,
 };

@@ -8,9 +8,13 @@ const path = require('node:path');
 
 const {
   parseArgs,
+  parseThinkingValue,
   resolveOutputPath,
   writeResponse,
   createLineWriter,
+  runOnce,
+  runStreamed,
+  extractThinking,
 } = require('../src/cli.js');
 
 test('empty argv returns no file, no flags', () => {
@@ -218,6 +222,104 @@ test('-- makes a flag-shaped output path a positional file', () => {
   assert.equal(opts.output, null);
 });
 
+test('thinking defaults to null', () => {
+  const opts = parseArgs(['chat.md']);
+  assert.equal(opts.thinking, null);
+});
+
+test('-t yes enables thinking', () => {
+  const opts = parseArgs(['-t', 'yes', 'chat.md']);
+  assert.equal(opts.thinking, true);
+  assert.equal(opts.file, 'chat.md');
+});
+
+test('-t no disables thinking', () => {
+  const opts = parseArgs(['-t', 'no', 'chat.md']);
+  assert.equal(opts.thinking, false);
+});
+
+test('--thinking=yes enables thinking', () => {
+  const opts = parseArgs(['--thinking=yes', 'chat.md']);
+  assert.equal(opts.thinking, true);
+});
+
+test('--thinking=no disables thinking', () => {
+  const opts = parseArgs(['--thinking=no', 'chat.md']);
+  assert.equal(opts.thinking, false);
+});
+
+test('--thinking with space-separated value', () => {
+  const opts = parseArgs(['--thinking', 'yes', 'chat.md']);
+  assert.equal(opts.thinking, true);
+});
+
+test('-t accepts true/false/1/0/on/off (case insensitive)', () => {
+  for (const [val, expected] of [
+    ['YES', true],
+    ['true', true],
+    ['1', true],
+    ['on', true],
+    ['NO', false],
+    ['false', false],
+    ['0', false],
+    ['off', false],
+  ]) {
+    assert.equal(parseArgs(['-t', val]).thinking, expected, val);
+  }
+});
+
+test('-t without a value throws', () => {
+  assert.throws(() => parseArgs(['-t']), /requires a value/);
+});
+
+test('--thinking without a value throws', () => {
+  assert.throws(() => parseArgs(['--thinking']), /requires a value/);
+});
+
+test('--thinking= with empty value throws', () => {
+  assert.throws(() => parseArgs(['--thinking=']), /requires a value/);
+});
+
+test('--thinking with a flag-shaped value throws', () => {
+  assert.throws(() => parseArgs(['-t', '-s']), /requires a value/);
+});
+
+test('-t with invalid value throws', () => {
+  assert.throws(() => parseArgs(['-t', 'maybe']), /expects yes or no/);
+});
+
+test('--thinking=invalid throws', () => {
+  assert.throws(() => parseArgs(['--thinking=maybe']), /expects yes or no/);
+});
+
+test('-t can appear after the file (order does not matter)', () => {
+  const opts = parseArgs(['chat.md', '-t', 'yes']);
+  assert.equal(opts.thinking, true);
+  assert.equal(opts.file, 'chat.md');
+});
+
+test('parseThinkingValue: accepts truthy strings', () => {
+  for (const v of ['yes', 'Yes', 'YES', 'true', '1', 'on', 'On']) {
+    assert.equal(parseThinkingValue(v, '-t/--thinking'), true, v);
+  }
+});
+
+test('parseThinkingValue: accepts falsy strings', () => {
+  for (const v of ['no', 'No', 'NO', 'false', '0', 'off']) {
+    assert.equal(parseThinkingValue(v, '-t/--thinking'), false, v);
+  }
+});
+
+test('parseThinkingValue: throws on missing value', () => {
+  assert.throws(() => parseThinkingValue(undefined, '-t/--thinking'), /requires a value/);
+  assert.throws(() => parseThinkingValue(null, '-t/--thinking'), /requires a value/);
+});
+
+test('parseThinkingValue: throws on unknown value', () => {
+  assert.throws(() => parseThinkingValue('maybe', '-t/--thinking'), /expects yes or no/);
+  assert.throws(() => parseThinkingValue('', '-t/--thinking'), /expects yes or no/);
+});
+
 const {
   resolveConfig,
   buildModel,
@@ -364,6 +466,60 @@ test('resolveConfig: passthrough fields land as-is on the config', () => {
     assert.equal(cfg.thinking, true);
     assert.equal(cfg.reasoning_effort, 'high');
     assert.deepEqual(cfg.stop, ['###']);
+  });
+});
+
+test('resolveConfig: thinking CLI true beats header false', () => {
+  withCleanEnv(() => {
+    process.env.LANGCHAT_MODEL = 'm';
+    const cfg = resolveConfig({
+      cliModel: 'm',
+      cliThinking: true,
+      header: { thinking: false },
+    });
+    assert.equal(cfg.thinking, true);
+  });
+});
+
+test('resolveConfig: thinking CLI false beats header true', () => {
+  withCleanEnv(() => {
+    process.env.LANGCHAT_MODEL = 'm';
+    const cfg = resolveConfig({
+      cliModel: 'm',
+      cliThinking: false,
+      header: { thinking: true },
+    });
+    assert.equal(cfg.thinking, false);
+  });
+});
+
+test('resolveConfig: no CLI thinking + header true sets thinking: true', () => {
+  withCleanEnv(() => {
+    process.env.LANGCHAT_MODEL = 'm';
+    const cfg = resolveConfig({
+      cliModel: 'm',
+      header: { thinking: true },
+    });
+    assert.equal(cfg.thinking, true);
+  });
+});
+
+test('resolveConfig: no CLI thinking + header false sets thinking: false', () => {
+  withCleanEnv(() => {
+    process.env.LANGCHAT_MODEL = 'm';
+    const cfg = resolveConfig({
+      cliModel: 'm',
+      header: { thinking: false },
+    });
+    assert.equal(cfg.thinking, false);
+  });
+});
+
+test('resolveConfig: no CLI thinking + no header leaves thinking unset', () => {
+  withCleanEnv(() => {
+    process.env.LANGCHAT_MODEL = 'm';
+    const cfg = resolveConfig({ cliModel: 'm' });
+    assert.equal(cfg.thinking, undefined);
   });
 });
 
@@ -559,6 +715,272 @@ test('createLineWriter: with a fileStream, writes to both file and stdout', () =
   } finally {
     restore.restore();
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('createLineWriter: with dim:true, wraps stdout output in ANSI dim but not file', () => {
+  const chunks = [];
+  const fakeStream = {
+    write(text) {
+      chunks.push(text);
+    },
+  };
+  const restore = captureStdout();
+  try {
+    const writer = createLineWriter(fakeStream, { dim: true });
+    writer.write('reasoning here\n');
+    writer.end();
+    const expected = '\x1b[2mreasoning here\n\x1b[0m';
+    assert.equal(restore.captured(), expected);
+    assert.deepEqual(chunks, ['reasoning here\n']);
+  } finally {
+    restore.restore();
+  }
+});
+
+test('extractThinking: pulls reasoning_content from additional_kwargs (DeepSeek)', () => {
+  const msg = {
+    content: 'final answer',
+    additional_kwargs: { reasoning_content: 'thinking...' },
+  };
+  assert.deepEqual(extractThinking(msg), {
+    reasoning: 'thinking...',
+    main: 'final answer',
+  });
+});
+
+test('extractThinking: pulls thinking blocks (Anthropic)', () => {
+  const msg = {
+    content: [
+      { type: 'thinking', text: 'let me think' },
+      { type: 'text', text: 'final answer' },
+    ],
+  };
+  assert.deepEqual(extractThinking(msg), {
+    reasoning: 'let me think',
+    main: 'final answer',
+  });
+});
+
+test('extractThinking: pulls reasoning blocks (OpenAI)', () => {
+  const msg = {
+    content: [
+      { type: 'reasoning', text: 'step 1' },
+      { type: 'text', text: 'final answer' },
+    ],
+  };
+  assert.deepEqual(extractThinking(msg), {
+    reasoning: 'step 1',
+    main: 'final answer',
+  });
+});
+
+test('extractThinking: plain string content has no reasoning', () => {
+  assert.deepEqual(extractThinking({ content: 'just text' }), {
+    reasoning: '',
+    main: 'just text',
+  });
+});
+
+test('extractThinking: handles mixed blocks (multiple kinds, multiple instances)', () => {
+  const msg = {
+    additional_kwargs: { reasoning_content: 'A' },
+    content: [
+      { type: 'thinking', text: 'B' },
+      { type: 'text', text: 'C' },
+      { type: 'reasoning', text: 'D' },
+      { type: 'text', text: 'E' },
+    ],
+  };
+  assert.deepEqual(extractThinking(msg), {
+    reasoning: 'ABD',
+    main: 'CE',
+  });
+});
+
+test('extractThinking: ignores non-object content blocks', () => {
+  const msg = {
+    content: [
+      null,
+      'raw string',
+      42,
+      { type: 'thinking', text: 'kept' },
+      { type: 'text', text: 'answer' },
+    ],
+  };
+  assert.deepEqual(extractThinking(msg), {
+    reasoning: 'kept',
+    main: 'answer',
+  });
+});
+
+test('extractThinking: returns empty object on null input', () => {
+  assert.deepEqual(extractThinking(null), { reasoning: '', main: '' });
+  assert.deepEqual(extractThinking(undefined), { reasoning: '', main: '' });
+});
+
+test('extractThinking: reasoning block using ".reasoning" field instead of ".text"', () => {
+  const msg = {
+    content: [
+      { type: 'reasoning', reasoning: 'via reasoning field' },
+      { type: 'text', text: 'answer' },
+    ],
+  };
+  assert.deepEqual(extractThinking(msg), {
+    reasoning: 'via reasoning field',
+    main: 'answer',
+  });
+});
+
+function makeFakeModel(aiMessage) {
+  return {
+    async invoke() {
+      return aiMessage;
+    },
+  };
+}
+
+test('runOnce: thinking=false suppresses reasoning on stdout', async () => {
+  const model = makeFakeModel({
+    text: 'final answer',
+    additional_kwargs: { reasoning_content: 'hidden thinking' },
+  });
+  const restore = captureStdout();
+  try {
+    const reply = await runOnce(model, [], { thinking: false });
+    assert.equal(restore.captured(), '');
+    assert.equal(reply, 'final answer');
+  } finally {
+    restore.restore();
+  }
+});
+
+test('runOnce: thinking=true prints reasoning dimmed then returns main reply', async () => {
+  const model = makeFakeModel({
+    text: 'final answer',
+    additional_kwargs: { reasoning_content: 'reasoning text' },
+  });
+  const restore = captureStdout();
+  try {
+    const reply = await runOnce(model, [], { thinking: true });
+    assert.equal(reply, 'final answer');
+    assert.equal(
+      restore.captured(),
+      '\x1b[2mreasoning text\x1b[0m\n'
+    );
+  } finally {
+    restore.restore();
+  }
+});
+
+test('runOnce: thinking=true with no reasoning produces no stdout', async () => {
+  const model = makeFakeModel({ text: 'final answer' });
+  const restore = captureStdout();
+  try {
+    const reply = await runOnce(model, [], { thinking: true });
+    assert.equal(reply, 'final answer');
+    assert.equal(restore.captured(), '');
+  } finally {
+    restore.restore();
+  }
+});
+
+test('runOnce: thinking=null is a no-op (existing behavior)', async () => {
+  const model = makeFakeModel({
+    text: 'final answer',
+    additional_kwargs: { reasoning_content: 'secret' },
+  });
+  const restore = captureStdout();
+  try {
+    const reply = await runOnce(model, [], { thinking: null });
+    assert.equal(reply, 'final answer');
+    assert.equal(restore.captured(), '');
+  } finally {
+    restore.restore();
+  }
+});
+
+function makeStreamingModel(chunks) {
+  return {
+    async stream() {
+      return (async function* () {
+        for (const c of chunks) yield c;
+      })();
+    },
+  };
+}
+
+test('runStreamed: thinking=true prints reasoning dimmed, main to stdout+file', async () => {
+  const chunks = [
+    {
+      content: [{ type: 'thinking', text: 'thinking ' }],
+      additional_kwargs: { reasoning_content: 'A ' },
+    },
+    { content: 'answer part 1' },
+    {
+      content: [
+        { type: 'thinking', text: 'more' },
+        { type: 'text', text: ' part 2' },
+      ],
+    },
+  ];
+  const fileChunks = [];
+  const fakeStream = {
+    write(text) {
+      fileChunks.push(text);
+    },
+  };
+  const restore = captureStdout();
+  try {
+    const reply = await runStreamed(makeStreamingModel(chunks), [], {
+      fileStream: fakeStream,
+      thinking: true,
+    });
+    assert.equal(reply, undefined);
+    const out = restore.captured();
+    assert.match(out, /\x1b\[2mA thinking more\x1b\[0m/);
+    assert.match(out, /answer part 1 part 2/);
+    assert.equal(fileChunks.join(''), 'answer part 1 part 2');
+    assert.ok(!fileChunks.join('').includes('\x1b['), 'file output has no ANSI');
+  } finally {
+    restore.restore();
+  }
+});
+
+test('runStreamed: thinking=false drops reasoning from stdout', async () => {
+  const chunks = [
+    { content: 'main only' },
+    {
+      content: [{ type: 'thinking', text: 'should not appear' }],
+      additional_kwargs: { reasoning_content: 'also hidden' },
+    },
+  ];
+  const restore = captureStdout();
+  try {
+    await runStreamed(makeStreamingModel(chunks), [], { thinking: false });
+    const out = restore.captured();
+    assert.match(out, /main only/);
+    assert.ok(!out.includes('should not appear'));
+    assert.ok(!out.includes('also hidden'));
+    assert.ok(!out.includes('\x1b['));
+  } finally {
+    restore.restore();
+  }
+});
+
+test('runStreamed: thinking=null keeps current behavior (only main text)', async () => {
+  const chunks = [
+    { content: 'main' },
+    { content: [{ type: 'thinking', text: 'IGNORED' }] },
+  ];
+  const restore = captureStdout();
+  try {
+    await runStreamed(makeStreamingModel(chunks), [], { thinking: null });
+    const out = restore.captured();
+    assert.match(out, /main/);
+    assert.ok(!out.includes('IGNORED'));
+  } finally {
+    restore.restore();
   }
 });
 
