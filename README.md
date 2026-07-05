@@ -77,8 +77,9 @@ Options:
   -o, --output <path>        Write the response to <path> as well as stdout
   -d, --debug                Write {{ patchify }} tiles next to each source image
       --allow-include-escape  Permit {{ include }} paths outside the chat file's directory
-  -t, --thinking <yes|no>    Print thinking tokens dimmed on stdout (yes) or
-                             omit them entirely (no). Precedence: flag > header.
+  -t, --thinking <yes|no>    Send `thinking: true` / `thinking: false` in the
+                             API request. Reasoning tokens returned by the model
+                             are always displayed on stdout in dimmed text.
   -h, --help                 Show this help and exit
 ```
 
@@ -194,26 +195,29 @@ langchat -s specs/mvp1/test_streaming.md
 
 Some reasoning models (DeepSeek-R1, Claude with extended thinking, OpenAI o1/o3,
 etc.) emit a separate stream of "thinking" / "reasoning" tokens alongside the
-final reply. Pass `-t`/`--thinking yes` to surface them on stdout, rendered in
-dimmed text, before the final answer:
+final reply. Whenever `langchat` sees reasoning content in the reply, it
+prints those tokens to stdout in dimmed text before the final answer — no flag
+required to see them:
 
 ```bash
-langchat -t yes specs/mvp1/chat.md        # dim reasoning, then answer
-langchat -s -t yes specs/mvp1/chat.md     # dim reasoning streams, then answer streams
-langchat -t no specs/mvp1/chat.md         # suppress reasoning entirely
-langchat -t yes -o reply.md chat.md       # dim reasoning on stdout; reply.md gets the plain reply
+langchat specs/mvp1/chat.md        # dim reasoning (if any), then answer
+langchat -s specs/mvp1/chat.md     # dim reasoning streams, then answer streams
+langchat -t no specs/mvp1/chat.md  # thinking sent as off; no dim output
+langchat -t yes -o reply.md chat.md # reasoning dimmed on stdout; reply.md gets the plain reply
 ```
 
-The flag auto-detects each provider's thinking format:
+The display auto-detects each provider's thinking format:
 
 - DeepSeek-R1 / `deepseek-chat` — `additional_kwargs.reasoning_content`
 - Anthropic Claude (OpenAI-compat) — content blocks with `type: 'thinking'`
 - OpenAI o1/o3 / Responses API — content blocks with `type: 'reasoning'`
 
-When the flag is on, the request body also sets `thinking: true` so the model
-actually produces the tokens; `-t no` sends `thinking: false` (forcing it off
-even if a `thinking:` frontmatter header enables it). The `-o`/`--output` file
-never contains ANSI codes — it gets only the plain reply.
+The `-t`/`--thinking` flag controls what is sent to the API: `yes` sets
+`thinking: true` so the model emits reasoning tokens; `no` sets
+`thinking: false` (forcing it off even if a `thinking:` frontmatter header
+enables it). Without the flag, `resolveConfig` falls back to the `thinking:`
+header value, or leaves the field unset. The `-o`/`--output` file never
+contains ANSI codes — it gets only the plain reply.
 
 ### MVP2 — Including a text file as context
 
@@ -364,7 +368,7 @@ directories are created automatically.
 | `-s, --stream`             | Stream the response token-by-token to stdout. Automatically disabled when a `# !output` schema is present. |
 | `-o, --output <path>`      | Write the response to `<path>` as well as stdout. Creates parent dirs if missing; overwrites existing files. |
 | `--allow-include-escape`   | Permit `{{ include "..." }}` paths to escape the chat file's directory. Default is to sandbox them. |
-| `-t, --thinking <yes|no>`  | Print reasoning / thinking tokens to stdout in dimmed text (yes) or omit them entirely (no). Accepts `yes`/`no`/`true`/`false`/`1`/`0`/`on`/`off`. Precedence: CLI flag > header > unset. |
+| `-t, --thinking <yes|no>`  | Send `thinking: true` (yes) or `thinking: false` (no) in the API request body. Reasoning tokens returned by the model are always displayed on stdout in dimmed text regardless of this flag. Precedence: CLI flag > header > unset. |
 | `-h, --help`               | Print the usage banner and exit.                                                                    |
 
 ## Include directive rules

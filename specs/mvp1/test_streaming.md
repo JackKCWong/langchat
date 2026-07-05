@@ -1,6 +1,6 @@
 ---
-model: qwen3.7-plus
-enable_thinking: false
+model: deepseek-r1
+enable_thinking: true
 ---
 # !system
 

@@ -840,29 +840,14 @@ function makeFakeModel(aiMessage) {
   };
 }
 
-test('runOnce: thinking=false suppresses reasoning on stdout', async () => {
-  const model = makeFakeModel({
-    text: 'final answer',
-    additional_kwargs: { reasoning_content: 'hidden thinking' },
-  });
-  const restore = captureStdout();
-  try {
-    const reply = await runOnce(model, [], { thinking: false });
-    assert.equal(restore.captured(), '');
-    assert.equal(reply, 'final answer');
-  } finally {
-    restore.restore();
-  }
-});
-
-test('runOnce: thinking=true prints reasoning dimmed then returns main reply', async () => {
+test('runOnce: prints reasoning dimmed then returns main reply', async () => {
   const model = makeFakeModel({
     text: 'final answer',
     additional_kwargs: { reasoning_content: 'reasoning text' },
   });
   const restore = captureStdout();
   try {
-    const reply = await runOnce(model, [], { thinking: true });
+    const reply = await runOnce(model, []);
     assert.equal(reply, 'final answer');
     assert.equal(
       restore.captured(),
@@ -873,11 +858,11 @@ test('runOnce: thinking=true prints reasoning dimmed then returns main reply', a
   }
 });
 
-test('runOnce: thinking=true with no reasoning produces no stdout', async () => {
+test('runOnce: with no reasoning, produces no extra stdout', async () => {
   const model = makeFakeModel({ text: 'final answer' });
   const restore = captureStdout();
   try {
-    const reply = await runOnce(model, [], { thinking: true });
+    const reply = await runOnce(model, []);
     assert.equal(reply, 'final answer');
     assert.equal(restore.captured(), '');
   } finally {
@@ -885,16 +870,22 @@ test('runOnce: thinking=true with no reasoning produces no stdout', async () => 
   }
 });
 
-test('runOnce: thinking=null is a no-op (existing behavior)', async () => {
+test('runOnce: with thinking blocks in content array, prints them dimmed', async () => {
   const model = makeFakeModel({
-    text: 'final answer',
-    additional_kwargs: { reasoning_content: 'secret' },
+    content: [
+      { type: 'thinking', text: 'step 1. ' },
+      { type: 'thinking', text: 'step 2. ' },
+      { type: 'text', text: 'final' },
+    ],
   });
   const restore = captureStdout();
   try {
-    const reply = await runOnce(model, [], { thinking: null });
-    assert.equal(reply, 'final answer');
-    assert.equal(restore.captured(), '');
+    const reply = await runOnce(model, []);
+    assert.equal(reply, 'final');
+    assert.equal(
+      restore.captured(),
+      '\x1b[2mstep 1. step 2. \x1b[0m\n'
+    );
   } finally {
     restore.restore();
   }
@@ -910,7 +901,7 @@ function makeStreamingModel(chunks) {
   };
 }
 
-test('runStreamed: thinking=true prints reasoning dimmed, main to stdout+file', async () => {
+test('runStreamed: streams reasoning dimmed, main to stdout+file', async () => {
   const chunks = [
     {
       content: [{ type: 'thinking', text: 'thinking ' }],
@@ -934,7 +925,6 @@ test('runStreamed: thinking=true prints reasoning dimmed, main to stdout+file', 
   try {
     const reply = await runStreamed(makeStreamingModel(chunks), [], {
       fileStream: fakeStream,
-      thinking: true,
     });
     assert.equal(reply, undefined);
     const out = restore.captured();
@@ -947,38 +937,17 @@ test('runStreamed: thinking=true prints reasoning dimmed, main to stdout+file', 
   }
 });
 
-test('runStreamed: thinking=false drops reasoning from stdout', async () => {
+test('runStreamed: with no reasoning chunks, no ANSI emitted', async () => {
   const chunks = [
-    { content: 'main only' },
-    {
-      content: [{ type: 'thinking', text: 'should not appear' }],
-      additional_kwargs: { reasoning_content: 'also hidden' },
-    },
+    { content: 'main ' },
+    { content: 'only' },
   ];
   const restore = captureStdout();
   try {
-    await runStreamed(makeStreamingModel(chunks), [], { thinking: false });
+    await runStreamed(makeStreamingModel(chunks), []);
     const out = restore.captured();
-    assert.match(out, /main only/);
-    assert.ok(!out.includes('should not appear'));
-    assert.ok(!out.includes('also hidden'));
+    assert.equal(out, 'main only');
     assert.ok(!out.includes('\x1b['));
-  } finally {
-    restore.restore();
-  }
-});
-
-test('runStreamed: thinking=null keeps current behavior (only main text)', async () => {
-  const chunks = [
-    { content: 'main' },
-    { content: [{ type: 'thinking', text: 'IGNORED' }] },
-  ];
-  const restore = captureStdout();
-  try {
-    await runStreamed(makeStreamingModel(chunks), [], { thinking: null });
-    const out = restore.captured();
-    assert.match(out, /main/);
-    assert.ok(!out.includes('IGNORED'));
   } finally {
     restore.restore();
   }

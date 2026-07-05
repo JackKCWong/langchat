@@ -17,8 +17,9 @@ Options:
   -o, --output <path>        Write the response to <path> as well as stdout
   -d, --debug                Write {{ patchify }} tiles next to each source image
       --allow-include-escape  Permit {{ include }} paths outside the chat file's directory
-  -t, --thinking <yes|no>    Print thinking tokens dimmed to stdout (yes) or
-                             omit them entirely (no). Precedence: flag > header.
+  -t, --thinking <yes|no>    Send "thinking: true"/"thinking: false" in the
+                             API request. Reasoning tokens returned by the model
+                             are always displayed on stdout in dimmed text.
   -h, --help                 Show this help and exit
 
 A chat file may begin with a "---" metadata header declaring per-file options
@@ -318,17 +319,15 @@ function extractThinking(messageLike) {
   return { reasoning, main };
 }
 
-async function runOnce(model, messages, { thinking = null } = {}) {
+async function runOnce(model, messages) {
   const aiMessage = await model.invoke(messages);
   const main =
     typeof aiMessage.text === 'string'
       ? aiMessage.text
       : stringifyContent(aiMessage.content);
-  if (thinking === true) {
-    const { reasoning } = extractThinking(aiMessage);
-    if (reasoning) {
-      process.stdout.write('\x1b[2m' + reasoning + '\x1b[0m\n');
-    }
+  const { reasoning } = extractThinking(aiMessage);
+  if (reasoning) {
+    process.stdout.write('\x1b[2m' + reasoning + '\x1b[0m\n');
   }
   return main;
 }
@@ -369,18 +368,18 @@ function createLineWriter(fileStream = null, { dim = false } = {}) {
   };
 }
 
-async function runStreamed(model, messages, { fileStream, thinking = null } = {}) {
+async function runStreamed(model, messages, { fileStream } = {}) {
   const streamIter = await model.stream(messages);
-  const thinkingWriter = thinking === true ? createLineWriter(null, { dim: true }) : null;
+  const thinkingWriter = createLineWriter(null, { dim: true });
   const writer = createLineWriter(fileStream);
   try {
     for await (const chunk of streamIter) {
       const { reasoning, main } = extractThinking(chunk);
-      if (thinkingWriter && reasoning) thinkingWriter.write(reasoning);
+      if (reasoning) thinkingWriter.write(reasoning);
       if (main) writer.write(main);
     }
   } finally {
-    if (thinkingWriter) thinkingWriter.end();
+    thinkingWriter.end();
     writer.end();
   }
 }
@@ -436,7 +435,7 @@ function writeResponse(text, outputPath) {
   process.stdout.write(text);
 }
 
-async function runStructured(baseModel, messages, outputSchema, { stream, thinking = null } = {}) {
+async function runStructured(baseModel, messages, outputSchema, { stream } = {}) {
   let model = baseModel;
   let effectiveStream = stream;
   if (stream) {
@@ -457,7 +456,7 @@ async function runStructured(baseModel, messages, outputSchema, { stream, thinki
   }
   const structured = model.withStructuredOutput(outputSchema);
   const aiMessage = await structured.invoke(messages);
-  if (thinking === true && aiMessage && typeof aiMessage === 'object') {
+  if (aiMessage && typeof aiMessage === 'object') {
     const { reasoning } = extractThinking(aiMessage);
     if (reasoning) {
       process.stdout.write('\x1b[2m' + reasoning + '\x1b[0m\n');
@@ -556,23 +555,19 @@ async function main(argv) {
     if (outputSchema) {
       const result = await runStructured(model, messages, outputSchema, {
         stream: opts.stream,
-        thinking: opts.thinking,
       });
       writeResponse(JSON.stringify(result, null, 2) + '\n', outputPath);
     } else if (opts.stream) {
       const fileStream = outputPath ? openOutputStream(outputPath) : null;
       try {
-        await runStreamed(model, messages, {
-          fileStream,
-          thinking: opts.thinking,
-        });
+        await runStreamed(model, messages, { fileStream });
         if (fileStream) fileStream.write('\n');
         process.stdout.write('\n');
       } finally {
         if (fileStream) fileStream.end();
       }
     } else {
-      const reply = await runOnce(model, messages, { thinking: opts.thinking });
+      const reply = await runOnce(model, messages);
       const text = reply.endsWith('\n') ? reply : reply + '\n';
       writeResponse(text, outputPath);
     }
