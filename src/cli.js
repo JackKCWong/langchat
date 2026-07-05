@@ -76,8 +76,18 @@ function resolveConfig() {
     );
     apiKey = 'sk-no-key-needed';
   }
+  if (RESPONSES_API_PREFERRED_MODEL_RE.test(model)) {
+    process.stderr.write(
+      `[langchat] warning: model "${model}" routes to the /v1/responses ` +
+        'endpoint in @langchain/openai, which uses a different streaming protocol. ' +
+        'For OpenAI-compatible servers (Ollama, LM Studio, vLLM, DeepSeek), use a ' +
+        'chat-completions model name like "gpt-4o-mini", "llama3.1", or "deepseek-chat".\n'
+    );
+  }
   return { model, baseURL, apiKey };
 }
+
+const RESPONSES_API_PREFERRED_MODEL_RE = /gpt-5\.[2-9]-pro|gpt-5\.[2-9]\.[2-9]-pro|codex/;
 
 function buildModel({ model, baseURL, apiKey, stream }) {
   const fields = { model };
@@ -86,6 +96,12 @@ function buildModel({ model, baseURL, apiKey, stream }) {
     fields.configuration = { baseURL };
   }
   if (stream) fields.streaming = true;
+  // Force the Chat Completions endpoint (/v1/chat/completions) regardless
+  // of model name. Without this, @langchain/openai >=1.x can route to the
+  // /v1/responses endpoint for certain models (e.g. gpt-5.2-pro, codex),
+  // which has a different streaming protocol and breaks `-s` for users
+  // hitting an OpenAI-compatible /chat/completions server.
+  fields.useResponsesApi = false;
   return new ChatOpenAI(fields);
 }
 
