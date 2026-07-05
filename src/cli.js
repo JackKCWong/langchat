@@ -101,17 +101,19 @@ function stringifyContent(content) {
   return out;
 }
 
-async function runChat(model, messages, { stream }) {
-  if (stream) {
-    let buf = '';
-    const streamIter = await model.stream(messages);
-    for await (const chunk of streamIter) {
-      buf += stringifyContent(chunk.content);
-    }
-    return buf;
-  }
+async function runOnce(model, messages) {
   const aiMessage = await model.invoke(messages);
-  return typeof aiMessage.text === 'string' ? aiMessage.text : stringifyContent(aiMessage.content);
+  return typeof aiMessage.text === 'string'
+    ? aiMessage.text
+    : stringifyContent(aiMessage.content);
+}
+
+async function runStreamed(model, messages) {
+  const streamIter = await model.stream(messages);
+  for await (const chunk of streamIter) {
+    const piece = stringifyContent(chunk.content);
+    if (piece) process.stdout.write(piece);
+  }
 }
 
 async function main(argv) {
@@ -164,12 +166,17 @@ async function main(argv) {
   const model = buildModel({ ...config, stream: opts.stream });
 
   try {
-    const reply = await runChat(model, messages, { stream: opts.stream });
-    process.stdout.write(reply.endsWith('\n') ? reply : reply + '\n');
+    if (opts.stream) {
+      await runStreamed(model, messages);
+      process.stdout.write('\n');
+    } else {
+      const reply = await runOnce(model, messages);
+      process.stdout.write(reply.endsWith('\n') ? reply : reply + '\n');
+    }
   } catch (err) {
     process.stderr.write(`langchat: request failed: ${err.message}\n`);
     process.exit(1);
   }
 }
 
-module.exports = { main, parseArgs };
+module.exports = { main, parseArgs, runOnce, runStreamed };
