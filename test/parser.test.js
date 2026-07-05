@@ -14,8 +14,8 @@ function parse(md, att) {
   return parseChatFile(md, att).messages;
 }
 
-test('parses a single #!system block', () => {
-  const md = `#!system
+test('parses a single # !system block', () => {
+  const md = `# !system
 
 You are a helpful assistant.
 `;
@@ -25,12 +25,12 @@ You are a helpful assistant.
   assert.equal(messages[0].content, 'You are a helpful assistant.');
 });
 
-test('parses #!system + #!user in order', () => {
-  const md = `#!system
+test('parses # !system + # !user in order', () => {
+  const md = `# !system
 
 You are a help assistant.
 
-#!user
+# !user
 
 What's the weather like today.
 `;
@@ -42,16 +42,16 @@ What's the weather like today.
   assert.equal(messages[1].content, "What's the weather like today.");
 });
 
-test('allows multiple #!user blocks in source order', () => {
-  const md = `#!user
+test('allows multiple # !user blocks in source order', () => {
+  const md = `# !user
 
 First message.
 
-#!assistant
+# !assistant
 
 Reply one.
 
-#!user
+# !user
 
 Second message.
 `;
@@ -66,10 +66,10 @@ Second message.
 });
 
 test('emits empty blocks as empty messages', () => {
-  const md = `#!system
+  const md = `# !system
 
 
-#!user
+# !user
 
 Hello.
 `;
@@ -82,7 +82,7 @@ Hello.
 });
 
 test('preserves multi-line content inside a block', () => {
-  const md = `#!user
+  const md = `# !user
 
 line one
 line two
@@ -94,20 +94,20 @@ line three
 });
 
 test('handles headers with surrounding whitespace', () => {
-  const md = `#!user   \n\nHi.\n`;
+  const md = `# !user   \n\nHi.\n`;
   const messages = parse(md);
   assert.equal(messages.length, 1);
   assert.equal(messages[0].content, 'Hi.');
 });
 
 test('throws on unknown role with line number', () => {
-  const md = `#!foo
+  const md = `# !foo
 
 bar
 `;
   assert.throws(
     () => parseChatFile(md),
-    /Unknown role "#!foo" at line 1/
+    /Unknown role "# !foo" at line 1/
   );
 });
 
@@ -131,7 +131,7 @@ test('rejects non-string input', () => {
 });
 
 test('user message with one image directive becomes a content array', () => {
-  const md = `#!user\n\nLook: {{ include "a.png" }}\n`;
+  const md = `# !user\n\nLook: {{ include "a.png" }}\n`;
   const att = [{ type: 'image', mimeType: 'image/png', data: 'AAAA', source: 'a.png' }];
   const messages = parse(md, att);
   assert.equal(messages.length, 1);
@@ -144,33 +144,33 @@ test('user message with one image directive becomes a content array', () => {
 });
 
 test('text-only user messages stay as strings when attachments exist', () => {
-  const md = `#!user\n\njust text, no directive\n#!user\n\nalso just text\n`;
+  const md = `# !user\n\njust text, no directive\n# !user\n\nalso just text\n`;
   const messages = parse(md, []);
   assert.equal(messages.length, 2);
   assert.equal(typeof messages[0].content, 'string');
   assert.equal(typeof messages[1].content, 'string');
 });
 
-test('image directive in a #!system block throws with a line number', () => {
-  const md = `#!system\n\nYou see {{ include "a.png" }}\n`;
+test('image directive in a # !system block throws with a line number', () => {
+  const md = `# !system\n\nYou see {{ include "a.png" }}\n`;
   const att = [{ type: 'image', mimeType: 'image/png', data: 'A', source: 'a.png' }];
   assert.throws(
     () => parseChatFile(md, att),
-    /image include.*at line 1.*only supported.*#!user/
+    /image include.*at line 1.*only supported.*# !user/
   );
 });
 
-test('image directive in a #!assistant block throws', () => {
-  const md = `#!assistant\n\nI see {{ include "a.png" }}\n`;
+test('image directive in a # !assistant block throws', () => {
+  const md = `# !assistant\n\nI see {{ include "a.png" }}\n`;
   const att = [{ type: 'image', mimeType: 'image/png', data: 'A', source: 'a.png' }];
   assert.throws(
     () => parseChatFile(md, att),
-    /image include.*at line 1.*only supported.*#!user/
+    /image include.*at line 1.*only supported.*# !user/
   );
 });
 
 test('throws when directives outnumber attachments', () => {
-  const md = `#!user\n\n{{ include "a.png" }} and {{ include "b.jpg" }}\n`;
+  const md = `# !user\n\n{{ include "a.png" }} and {{ include "b.jpg" }}\n`;
   const att = [{ type: 'image', mimeType: 'image/png', data: 'A', source: 'a.png' }];
   assert.throws(
     () => parseChatFile(md, att),
@@ -179,7 +179,7 @@ test('throws when directives outnumber attachments', () => {
 });
 
 test('throws when attachments outnumber directives', () => {
-  const md = `#!user\n\nplain text no directive\n`;
+  const md = `# !user\n\nplain text no directive\n`;
   const att = [
     { type: 'image', mimeType: 'image/png', data: 'A', source: 'a.png' },
     { type: 'image', mimeType: 'image/jpeg', data: 'B', source: 'b.jpg' },
@@ -191,7 +191,7 @@ test('throws when attachments outnumber directives', () => {
 });
 
 test('multiple images in one user message preserve directive order', () => {
-  const md = `#!user\n\nfirst {{ include "a.png" }} second {{ include "b.jpg" }} end\n`;
+  const md = `# !user\n\nfirst {{ include "a.png" }} second {{ include "b.jpg" }} end\n`;
   const att = [
     { type: 'image', mimeType: 'image/png', data: 'A', source: 'a.png' },
     { type: 'image', mimeType: 'image/jpeg', data: 'B', source: 'b.jpg' },
@@ -208,18 +208,18 @@ test('multiple images in one user message preserve directive order', () => {
 });
 
 test('rejects non-array attachments', () => {
-  assert.throws(() => parseChatFile('#!user\n\nx\n', 'not-an-array'), TypeError);
+  assert.throws(() => parseChatFile('# !user\n\nx\n', 'not-an-array'), TypeError);
 });
 
-test('returns outputSchema: null when no #!output block is present', () => {
-  const md = `#!system\n\nsys\n#!user\n\nhi\n`;
+test('returns outputSchema: null when no # !output block is present', () => {
+  const md = `# !system\n\nsys\n# !user\n\nhi\n`;
   const { messages, outputSchema } = parseChatFile(md);
   assert.equal(messages.length, 2);
   assert.equal(outputSchema, null);
 });
 
-test('#!output with fenced JSON returns parsed schema and adds no message', () => {
-  const md = `#!system\n\nsys\n#!user\n\nhi\n#!output\n\n\`\`\`json\n{"type":"object","properties":{"name":{"type":"string"}}}\n\`\`\`\n`;
+test('# !output with fenced JSON returns parsed schema and adds no message', () => {
+  const md = `# !system\n\nsys\n# !user\n\nhi\n# !output\n\n\`\`\`json\n{"type":"object","properties":{"name":{"type":"string"}}}\n\`\`\`\n`;
   const { messages, outputSchema } = parseChatFile(md);
   assert.equal(messages.length, 2);
   assert.deepEqual(outputSchema, {
@@ -228,46 +228,46 @@ test('#!output with fenced JSON returns parsed schema and adds no message', () =
   });
 });
 
-test('#!output with a plain (unfenced) JSON object is accepted', () => {
-  const md = `#!user\n\nhi\n#!output\n\n{"type":"object"}\n`;
+test('# !output with a plain (unfenced) JSON object is accepted', () => {
+  const md = `# !user\n\nhi\n# !output\n\n{"type":"object"}\n`;
   const { messages, outputSchema } = parseChatFile(md);
   assert.equal(messages.length, 1);
   assert.deepEqual(outputSchema, { type: 'object' });
 });
 
-test('#!output accepts a fence without a language tag', () => {
-  const md = `#!user\n\nhi\n#!output\n\n\`\`\`\n{"a":1}\n\`\`\`\n`;
+test('# !output accepts a fence without a language tag', () => {
+  const md = `# !user\n\nhi\n# !output\n\n\`\`\`\n{"a":1}\n\`\`\`\n`;
   const { messages, outputSchema } = parseChatFile(md);
   assert.equal(messages.length, 1);
   assert.deepEqual(outputSchema, { a: 1 });
 });
 
-test('multiple #!output blocks throw with a line number', () => {
-  const md = `#!user\n\nhi\n#!output\n\n{"a":1}\n#!output\n\n{"b":2}\n`;
+test('multiple # !output blocks throw with a line number', () => {
+  const md = `# !user\n\nhi\n# !output\n\n{"a":1}\n# !output\n\n{"b":2}\n`;
   assert.throws(
     () => parseChatFile(md),
-    /duplicate #!output block at line \d+/
+    /duplicate # !output block at line \d+/
   );
 });
 
-test('empty #!output block throws with the header line number', () => {
-  const md = `#!user\n\nhi\n#!output\n\n\n`;
+test('empty # !output block throws with the header line number', () => {
+  const md = `# !user\n\nhi\n# !output\n\n\n`;
   assert.throws(
     () => parseChatFile(md),
-    /#!output block at line 4 is empty/
+    /# !output block at line 4 is empty/
   );
 });
 
-test('invalid JSON in #!output throws with the header line number', () => {
-  const md = `#!user\n\nhi\n#!output\n\n\`\`\`json\n{ not json }\n\`\`\`\n`;
+test('invalid JSON in # !output throws with the header line number', () => {
+  const md = `# !user\n\nhi\n# !output\n\n\`\`\`json\n{ not json }\n\`\`\`\n`;
   assert.throws(
     () => parseChatFile(md),
-    /#!output block at line 4 is not valid JSON/
+    /# !output block at line 4 is not valid JSON/
   );
 });
 
-test('messages and outputSchema are independent: a chat with only #!output still fails the "no messages" check', () => {
-  const md = `#!output\n\n{"type":"object"}\n`;
+test('messages and outputSchema are independent: a chat with only # !output still fails the "no messages" check', () => {
+  const md = `# !output\n\n{"type":"object"}\n`;
   assert.throws(
     () => parseChatFile(md),
     /No messages found/

@@ -1,7 +1,7 @@
-#!system
+# !system
 
 You are a help assistant.
 
-#!user
+# !user
 
 What's the weather like today.

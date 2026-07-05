@@ -1,13 +1,13 @@
-#!system
+# !system
 
 You are a help assistant.
 
-#!user
+# !user
 
 Answer my questions based on the below context:
 
 {{ include "Goku.png" }}
 
-#!user
+# !user
 
 What is Sun Goku saying?

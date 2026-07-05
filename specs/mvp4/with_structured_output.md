@@ -1,8 +1,8 @@
-#!system
+# !system
 
 You are a help assistant.
 
-#!user
+# !user
 
 Answer my questions based on the below context:
 
@@ -10,11 +10,11 @@ Answer my questions based on the below context:
 {{ include "context.txt" }}
 </context>
 
-#!user
+# !user
 
 Who is mentioned above?
 
-#!output
+# !output
 
 ```json
 {

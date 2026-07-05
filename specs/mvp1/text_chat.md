@@ -11,14 +11,14 @@ where `chat.md` looks like this:
 
 ```markdown
 
-#!system
+# !system
 
 You are a help assistant.
 
-#!user
+# !user
 
 What's the weather like today.
 
 ```
 
-messages are separated by `#!`. There could be multiple user messages mixed with text and images. Only implement text message for now but design it to be extensible later.
+messages are separated by `# !`. There could be multiple user messages mixed with text and images. Only implement text message for now but design it to be extensible later.

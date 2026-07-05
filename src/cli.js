@@ -16,7 +16,7 @@ Options:
       --allow-include-escape  Permit {{ include }} paths outside the chat file's directory
   -h, --help                 Show this help and exit
 
-Use a "#!output" block containing a JSON Schema to constrain the response shape.
+Use a "# !output" block containing a JSON Schema to constrain the response shape.
 When present, the model returns a parsed object which is pretty-printed as JSON.
 
 Environment (auto-loaded from ./.env if present; existing env vars win):
@@ -184,7 +184,7 @@ async function runStructured(baseModel, messages, outputSchema, { stream }) {
   let effectiveStream = stream;
   if (stream) {
     process.stderr.write(
-      '[langchat] warning: -s/--stream ignored: not supported with #!output structured output.\n'
+      '[langchat] warning: -s/--stream ignored: not supported with # !output structured output.\n'
     );
     effectiveStream = false;
   }

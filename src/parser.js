@@ -6,7 +6,7 @@ const {
   AIMessage,
 } = require('@langchain/core/messages');
 
-const HEADER_RE = /^#!(system|user|assistant|output)\s*$/;
+const HEADER_RE = /^# !(system|user|assistant|output)\s*$/;
 const DIRECTIVE_RE = /\{\{\s*include\s+"([^"]+)"\s*\}\}/g;
 
 const ROLE_FACTORIES = {
@@ -23,17 +23,17 @@ function stripCodeFence(text) {
 function parseOutputSchema(rawContent, lineNumber) {
   let text = (rawContent || '').trim();
   if (!text) {
-    throw new Error(`#!output block at line ${lineNumber} is empty`);
+    throw new Error(`# !output block at line ${lineNumber} is empty`);
   }
   text = stripCodeFence(text).trim();
   if (!text) {
-    throw new Error(`#!output block at line ${lineNumber} is empty`);
+    throw new Error(`# !output block at line ${lineNumber} is empty`);
   }
   try {
     return JSON.parse(text);
   } catch (err) {
     throw new Error(
-      `#!output block at line ${lineNumber} is not valid JSON: ${err.message}`
+      `# !output block at line ${lineNumber} is not valid JSON: ${err.message}`
     );
   }
 }
@@ -50,7 +50,7 @@ function expandUserContent(rawText, attachments, role, lineNumber, startIdx) {
     const snippet = m ? m[0] : '';
     throw new Error(
       `image include ${snippet} at line ${lineNumber} is only supported ` +
-        `inside a #!user block (found #!${role})`
+        `inside a # !user block (found # !${role})`
     );
   }
 
@@ -104,8 +104,8 @@ function parseChatFile(text, attachments = []) {
     if (currentRole === 'output') {
       if (outputSeen) {
         throw new Error(
-          `duplicate #!output block at line ${currentHeaderLine}; ` +
-            'only one #!output block is allowed per chat file.'
+          `duplicate # !output block at line ${currentHeaderLine}; ` +
+            'only one # !output block is allowed per chat file.'
         );
       }
       outputSeen = true;
@@ -144,17 +144,17 @@ function parseChatFile(text, attachments = []) {
       currentHeaderLine = lineNumber;
       return;
     }
-    if (line.startsWith('#!')) {
+    if (line.startsWith('# !')) {
       const token = line.slice(2).trim().split(/\s+/)[0] || '';
       throw new Error(
-        `Unknown role "#!${token}" at line ${lineNumber}. ` +
+        `Unknown role "# !${token}" at line ${lineNumber}. ` +
           `Expected one of: ${Object.keys(ROLE_FACTORIES).join(', ')}, output.`
       );
     }
     if (currentRole === null) {
       throw new Error(
         `Unexpected content at line ${lineNumber}: ` +
-          `messages must begin with a "#!<role>" header.`
+          `messages must begin with a "# !<role>" header.`
       );
     }
     currentLines.push(line);
@@ -171,7 +171,7 @@ function parseChatFile(text, attachments = []) {
 
   if (messages.length === 0) {
     throw new Error(
-      'No messages found. The file must contain at least one "#!system", "#!user", or "#!assistant" block.'
+      'No messages found. The file must contain at least one "# !system", "# !user", or "# !assistant" block.'
     );
   }
 

@@ -166,9 +166,9 @@ test('leaves text without directives unchanged', () => {
   assert.equal(out, 'plain text {{ not include }} {{ include }} X');
 });
 
-test('expansion integrates with the chat parser (directive inside a #!user block)', () => {
+test('expansion integrates with the chat parser (directive inside a # !user block)', () => {
   const dir = makeTmpDir();
-  writeFile(dir, 'chat.md', `#!user\n\nAnswer based on: {{ include "ctx.txt" }}\n`);
+  writeFile(dir, 'chat.md', `# !user\n\nAnswer based on: {{ include "ctx.txt" }}\n`);
   writeFile(dir, 'ctx.txt', 'the context');
   const { parseChatFile } = require('../src/parser.js');
   const expanded = resolveIncludes(

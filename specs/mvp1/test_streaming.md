@@ -1,7 +1,7 @@
-#!system
+# !system
 
 You are a help assistant.
 
-#!user
+# !user
 
 Tell me a bell-time story for a 7 years old.
