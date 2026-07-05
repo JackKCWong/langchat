@@ -145,7 +145,7 @@ function parseChatFile(text, attachments = []) {
       return;
     }
     if (line.startsWith('# !')) {
-      const token = line.slice(2).trim().split(/\s+/)[0] || '';
+      const token = line.slice(3).trim().split(/\s+/)[0] || '';
       throw new Error(
         `Unknown role "# !${token}" at line ${lineNumber}. ` +
           `Expected one of: ${Object.keys(ROLE_FACTORIES).join(', ')}, output.`

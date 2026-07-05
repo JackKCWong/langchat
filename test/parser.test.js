@@ -207,6 +207,77 @@ test('multiple images in one user message preserve directive order', () => {
   ]);
 });
 
+test('multiple include directives across multiple user messages consume attachments in order', () => {
+  const md = `# !user\n\nfirst {{ include "a.png" }}\n# !assistant\n\nok\n# !user\n\nthen {{ include "b.jpg" }} and {{ include "c.gif" }}\n`;
+  const att = [
+    { type: 'image', mimeType: 'image/png', data: 'A', source: 'a.png' },
+    { type: 'image', mimeType: 'image/jpeg', data: 'B', source: 'b.jpg' },
+    { type: 'image', mimeType: 'image/gif', data: 'C', source: 'c.gif' },
+  ];
+  const messages = parse(md, att);
+  assert.equal(messages.length, 3);
+  assert.ok(Array.isArray(messages[0].content));
+  assert.deepEqual(messages[0].content, [
+    { type: 'text', text: 'first ' },
+    { type: 'image', mimeType: 'image/png', data: 'A', source: 'a.png' },
+  ]);
+  assert.equal(messages[1].content, 'ok');
+  assert.ok(Array.isArray(messages[2].content));
+  assert.deepEqual(messages[2].content, [
+    { type: 'text', text: 'then ' },
+    { type: 'image', mimeType: 'image/jpeg', data: 'B', source: 'b.jpg' },
+    { type: 'text', text: ' and ' },
+    { type: 'image', mimeType: 'image/gif', data: 'C', source: 'c.gif' },
+  ]);
+});
+
+test('a single user message mixes text segments and include directives preserving order', () => {
+  const md = `# !user\n\nCompare these:\n1) {{ include "a.png" }}\n2) {{ include "b.jpg" }}\n3) {{ include "c.webp" }}\nWhich differ?\n`;
+  const att = [
+    { type: 'image', mimeType: 'image/png', data: 'A', source: 'a.png' },
+    { type: 'image', mimeType: 'image/jpeg', data: 'B', source: 'b.jpg' },
+    { type: 'image', mimeType: 'image/webp', data: 'C', source: 'c.webp' },
+  ];
+  const messages = parse(md, att);
+  assert.equal(messages.length, 1);
+  const blocks = messages[0].content;
+  const flattened = blocks.map((b) =>
+    b.type === 'text' ? `T:${b.text}` : `I:${b.mimeType}`
+  );
+  assert.deepEqual(flattened, [
+    'T:Compare these:\n1) ',
+    'I:image/png',
+    'T:\n2) ',
+    'I:image/jpeg',
+    'T:\n3) ',
+    'I:image/webp',
+    'T:\nWhich differ?',
+  ]);
+  assert.deepEqual(blocks[1], { type: 'image', mimeType: 'image/png', data: 'A', source: 'a.png' });
+  assert.deepEqual(blocks[3], { type: 'image', mimeType: 'image/jpeg', data: 'B', source: 'b.jpg' });
+  assert.deepEqual(blocks[5], { type: 'image', mimeType: 'image/webp', data: 'C', source: 'c.webp' });
+});
+
+test('a single user message mixes text files and images across multiple include directives', () => {
+  const md = `# !user\n\nLog: {{ include "run.log" }}\nScreenshot: {{ include "shot.png" }}\nConfig: {{ include "config.yaml" }}\n`;
+  const att = [
+    { type: 'text', text: 'INFO boot ok', source: 'run.log' },
+    { type: 'image', mimeType: 'image/png', data: 'SHOT', source: 'shot.png' },
+    { type: 'text', text: 'port: 8080', source: 'config.yaml' },
+  ];
+  const messages = parse(md, att);
+  assert.equal(messages.length, 1);
+  assert.ok(Array.isArray(messages[0].content));
+  assert.deepEqual(messages[0].content, [
+    { type: 'text', text: 'Log: ' },
+    { type: 'text', text: 'INFO boot ok', source: 'run.log' },
+    { type: 'text', text: '\nScreenshot: ' },
+    { type: 'image', mimeType: 'image/png', data: 'SHOT', source: 'shot.png' },
+    { type: 'text', text: '\nConfig: ' },
+    { type: 'text', text: 'port: 8080', source: 'config.yaml' },
+  ]);
+});
+
 test('rejects non-array attachments', () => {
   assert.throws(() => parseChatFile('# !user\n\nx\n', 'not-an-array'), TypeError);
 });
