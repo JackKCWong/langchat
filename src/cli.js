@@ -15,6 +15,7 @@ Options:
   -m, --model <name>         Model name (overrides LANGCHAT_MODEL)
   -s, --stream               Stream the response token-by-token to stdout
   -o, --output <path>        Write the response to <path> as well as stdout
+  -d, --debug                Write {{ patchify }} tiles next to each source image
       --allow-include-escape  Permit {{ include }} paths outside the chat file's directory
   -h, --help                 Show this help and exit
 
@@ -58,6 +59,7 @@ function parseArgs(argv) {
     allowIncludeEscape: false,
     model: null,
     output: null,
+    debug: false,
   };
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
@@ -66,6 +68,8 @@ function parseArgs(argv) {
       opts.help = true;
     } else if (a === '-s' || a === '--stream') {
       opts.stream = true;
+    } else if (a === '-d' || a === '--debug') {
+      opts.debug = true;
     } else if (a === '--allow-include-escape') {
       opts.allowIncludeEscape = true;
     } else if (a === '-m' || a === '--model') {
@@ -401,6 +405,7 @@ async function main(argv) {
     expanded = await resolveIncludes(body, {
       baseDir: path.dirname(absPath),
       allowEscape: opts.allowIncludeEscape,
+      debug: opts.debug,
     });
   } catch (err) {
     process.stderr.write(`langchat: ${err.message}\n`);

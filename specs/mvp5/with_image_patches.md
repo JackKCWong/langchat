@@ -8,10 +8,11 @@ You are a help assistant.
 
 # !user
 
-Answer my questions based on the below context:
+This is an image splitted into 4 pieces, tiling from left to right, top to bottom, with 30% overlap.
+Piece them together and answer my question
 
-{{ patchify "Goku.png", 2, 2, 5, 10 }}
+{{ patchify "Goku.png", 2, 2, 30, 30 }}
 
 # !user
 
-What is Sun Goku saying?
+What is adult Sun Goku saying?

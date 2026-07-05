@@ -44,6 +44,7 @@ function resolveIncludes(text, opts = {}) {
   const imageExtensions = opts.imageExtensions || DEFAULT_IMAGE_EXTENSIONS;
   const imageMimeTypes = opts.imageMimeTypes || DEFAULT_IMAGE_MIME_TYPES;
   const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
+  const debug = opts.debug ?? false;
   const stack = [];
   const attachments = [];
 
@@ -108,46 +109,51 @@ function resolveIncludes(text, opts = {}) {
     const out = [];
     let cursor = 0;
 
+    const prevLastIndex = DIRECTIVE_RE.lastIndex;
     DIRECTIVE_RE.lastIndex = 0;
-    let m;
-    while ((m = DIRECTIVE_RE.exec(snippet)) !== null) {
-      if (m.index > cursor) {
-        out.push(snippet.slice(cursor, m.index));
-      }
-
-      const rawPath = m[1];
-      const resolved = resolvePath(rawPath, fileDir);
-
-      const ext = path.extname(resolved).toLowerCase();
-      const isImage = imageExtensions.has(ext);
-
-      stack.push(resolved);
-      try {
-        if (isImage) {
-          let buf;
-          try {
-            buf = fs.readFileSync(resolved);
-          } catch (err) {
-            throw new Error(
-              `include failed: ${rawPath} (${resolved}): ${err.message}`
-            );
-          }
-          recordImage(rawPath, resolved, buf);
-          out.push(m[0]);
-        } else {
-          const content = readText(rawPath, resolved);
-          const nested = await expand(
-            content,
-            path.dirname(resolved),
-            depth + 1
-          );
-          out.push(nested);
+    try {
+      let m;
+      while ((m = DIRECTIVE_RE.exec(snippet)) !== null) {
+        if (m.index > cursor) {
+          out.push(snippet.slice(cursor, m.index));
         }
-      } finally {
-        stack.pop();
-      }
 
-      cursor = m.index + m[0].length;
+        const rawPath = m[1];
+        const resolved = resolvePath(rawPath, fileDir);
+
+        const ext = path.extname(resolved).toLowerCase();
+        const isImage = imageExtensions.has(ext);
+
+        stack.push(resolved);
+        try {
+          if (isImage) {
+            let buf;
+            try {
+              buf = fs.readFileSync(resolved);
+            } catch (err) {
+              throw new Error(
+                `include failed: ${rawPath} (${resolved}): ${err.message}`
+              );
+            }
+            recordImage(rawPath, resolved, buf);
+            out.push(m[0]);
+          } else {
+            const content = readText(rawPath, resolved);
+            const nested = await expand(
+              content,
+              path.dirname(resolved),
+              depth + 1
+            );
+            out.push(nested);
+          }
+        } finally {
+          stack.pop();
+        }
+
+        cursor = m.index + m[0].length;
+      }
+    } finally {
+      DIRECTIVE_RE.lastIndex = prevLastIndex;
     }
 
     if (cursor < snippet.length) {
@@ -159,13 +165,18 @@ function resolveIncludes(text, opts = {}) {
 
   async function applyPatchify(text, fileDir) {
     const matches = [];
+    const prevLastIndex = PATCHIFY_DIRECTIVE_RE.lastIndex;
     PATCHIFY_DIRECTIVE_RE.lastIndex = 0;
-    let m;
-    while ((m = PATCHIFY_DIRECTIVE_RE.exec(text)) !== null) {
-      matches.push({ offset: m.index, length: m[0].length, raw: m[0], groups: m });
-      if (m.index === PATCHIFY_DIRECTIVE_RE.lastIndex) {
-        PATCHIFY_DIRECTIVE_RE.lastIndex++;
+    try {
+      let m;
+      while ((m = PATCHIFY_DIRECTIVE_RE.exec(text)) !== null) {
+        matches.push({ offset: m.index, length: m[0].length, raw: m[0], groups: m });
+        if (m.index === PATCHIFY_DIRECTIVE_RE.lastIndex) {
+          PATCHIFY_DIRECTIVE_RE.lastIndex++;
+        }
       }
+    } finally {
+      PATCHIFY_DIRECTIVE_RE.lastIndex = prevLastIndex;
     }
 
     let result = text;
@@ -205,6 +216,7 @@ function resolveIncludes(text, opts = {}) {
       }
 
       const placeholders = [];
+      let writtenDebug = 0;
       for (const p of patches) {
         const label = sourceLabelFor(args.path, p.row, p.col);
         attachments.push({
@@ -214,6 +226,22 @@ function resolveIncludes(text, opts = {}) {
           source: label,
         });
         placeholders.push(`{{ include "${label}" }}`);
+        if (debug) {
+          const outPath = path.join(path.dirname(resolved), label);
+          try {
+            fs.writeFileSync(outPath, p.patch);
+            writtenDebug += 1;
+          } catch (err) {
+            process.stderr.write(
+              `[langchat] --debug failed to write ${outPath}: ${err.message}\n`
+            );
+          }
+        }
+      }
+      if (debug && writtenDebug > 0) {
+        process.stderr.write(
+          `[langchat] --debug wrote ${writtenDebug} patch${writtenDebug === 1 ? '' : 'es'} next to ${resolved}\n`
+        );
       }
 
       result =

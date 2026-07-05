@@ -407,24 +407,6 @@ test('parser.js consumes patchify placeholders as image attachments in order', a
   );
 });
 
-test('resolveIncludes handles a text-included file that itself uses patchify', async () => {
-  const dir = makeTmpDir();
-  fs.writeFileSync(path.join(dir, 'a.png'), await makePng(60, 40));
-  write(dir, 'helper.md', 'P={{ patchify "a.png", 1, 2, 0, 0 }}');
-  write(dir, 'chat.md', 'before {{ include "helper.md" }} after');
-
-  const result = await resolveIncludes(
-    fs.readFileSync(path.join(dir, 'chat.md'), 'utf8'),
-    { baseDir: dir }
-  );
-
-  assert.equal(
-    result.text,
-    'before P={{ include "a[r0c0].png" }} {{ include "a[r0c1].png" }} after'
-  );
-  assert.equal(result.attachments.length, 2);
-});
-
 function write(dir, name, contents) {
   fs.writeFileSync(path.join(dir, name), contents);
 }

@@ -1,5 +1,6 @@
 'use strict';
 
+const path = require('node:path');
 const sharp = require('sharp');
 
 const PATCHIFY_DIRECTIVE_RE =
@@ -8,17 +9,23 @@ const PATCHIFY_DIRECTIVE_RE =
 const DEFAULT_TILE_MIME_TYPE = 'image/png';
 
 function parsePatchifyArgs(match) {
-  const m = PATCHIFY_DIRECTIVE_RE.exec(match);
-  if (!m) {
-    throw new Error(`patchify: cannot parse arguments from "${match}"`);
+  const prevLastIndex = PATCHIFY_DIRECTIVE_RE.lastIndex;
+  PATCHIFY_DIRECTIVE_RE.lastIndex = 0;
+  try {
+    const m = PATCHIFY_DIRECTIVE_RE.exec(match);
+    if (!m) {
+      throw new Error(`patchify: cannot parse arguments from "${match}"`);
+    }
+    return {
+      path: m[1],
+      m: parseInt(m[2], 10),
+      n: parseInt(m[3], 10),
+      x: parseFloat(m[4]),
+      y: parseFloat(m[5]),
+    };
+  } finally {
+    PATCHIFY_DIRECTIVE_RE.lastIndex = prevLastIndex;
   }
-  return {
-    path: m[1],
-    m: parseInt(m[2], 10),
-    n: parseInt(m[3], 10),
-    x: parseFloat(m[4]),
-    y: parseFloat(m[5]),
-  };
 }
 
 function validatePatchifyArgs(args) {
@@ -136,8 +143,9 @@ async function patchifyImage(buffer, { m, n, x, y } = {}) {
 }
 
 function sourceLabelFor(rawPath, row, col) {
-  const dot = rawPath.lastIndexOf('.');
-  const base = dot > 0 ? rawPath.slice(0, dot) : rawPath;
+  const name = path.basename(rawPath);
+  const dot = name.lastIndexOf('.');
+  const base = dot > 0 ? name.slice(0, dot) : name;
   return `${base}[r${row}c${col}].png`;
 }
 

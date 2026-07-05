@@ -75,6 +75,7 @@ Options:
   -m, --model <name>         Model name (overrides LANGCHAT_MODEL)
   -s, --stream               Stream the response token-by-token to stdout
   -o, --output <path>        Write the response to <path> as well as stdout
+  -d, --debug                Write {{ patchify }} tiles next to each source image
       --allow-include-escape  Permit {{ include }} paths outside the chat file's directory
   -h, --help                 Show this help and exit
 ```
