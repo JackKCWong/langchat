@@ -6,7 +6,7 @@ const {
   AIMessage,
 } = require('@langchain/core/messages');
 
-const HEADER_RE = /^#!(system|user|assistant)\s*$/;
+const HEADER_RE = /^#!(system|user|assistant|output)\s*$/;
 const DIRECTIVE_RE = /\{\{\s*include\s+"([^"]+)"\s*\}\}/g;
 
 const ROLE_FACTORIES = {
@@ -14,6 +14,29 @@ const ROLE_FACTORIES = {
   user: HumanMessage,
   assistant: AIMessage,
 };
+
+function stripCodeFence(text) {
+  const match = text.match(/^```[a-zA-Z]*\s*\n([\s\S]*?)\n```\s*$/);
+  return match ? match[1] : text;
+}
+
+function parseOutputSchema(rawContent, lineNumber) {
+  let text = (rawContent || '').trim();
+  if (!text) {
+    throw new Error(`#!output block at line ${lineNumber} is empty`);
+  }
+  text = stripCodeFence(text).trim();
+  if (!text) {
+    throw new Error(`#!output block at line ${lineNumber} is empty`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw new Error(
+      `#!output block at line ${lineNumber} is not valid JSON: ${err.message}`
+    );
+  }
+}
 
 function expandUserContent(rawText, attachments, role, lineNumber, startIdx) {
   if (!DIRECTIVE_RE.test(rawText)) {
@@ -71,9 +94,28 @@ function parseChatFile(text, attachments = []) {
   let currentHeaderLine = -1;
   let attachmentIdx = 0;
 
+  let outputRaw = null;
+  let outputLine = -1;
+  let outputSeen = false;
+
   const flush = () => {
     if (currentRole === null) return;
     const raw = currentLines.join('\n').replace(/^\n+|\n+$/g, '');
+    if (currentRole === 'output') {
+      if (outputSeen) {
+        throw new Error(
+          `duplicate #!output block at line ${currentHeaderLine}; ` +
+            'only one #!output block is allowed per chat file.'
+        );
+      }
+      outputSeen = true;
+      outputRaw = raw;
+      outputLine = currentHeaderLine;
+      currentRole = null;
+      currentLines = [];
+      currentHeaderLine = -1;
+      return;
+    }
     const { content, nextIdx } = expandUserContent(
       raw,
       attachments,
@@ -106,7 +148,7 @@ function parseChatFile(text, attachments = []) {
       const token = line.slice(2).trim().split(/\s+/)[0] || '';
       throw new Error(
         `Unknown role "#!${token}" at line ${lineNumber}. ` +
-          `Expected one of: ${Object.keys(ROLE_FACTORIES).join(', ')}.`
+          `Expected one of: ${Object.keys(ROLE_FACTORIES).join(', ')}, output.`
       );
     }
     if (currentRole === null) {
@@ -133,7 +175,11 @@ function parseChatFile(text, attachments = []) {
     );
   }
 
-  return messages;
+  const outputSchema = outputSeen
+    ? parseOutputSchema(outputRaw, outputLine)
+    : null;
+
+  return { messages, outputSchema };
 }
 
-module.exports = { parseChatFile };
+module.exports = { parseChatFile, parseOutputSchema };

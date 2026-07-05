@@ -15,6 +15,9 @@ Options:
       --allow-include-escape  Permit {{ include }} paths outside the chat file's directory
   -h, --help                 Show this help and exit
 
+Use a "#!output" block containing a JSON Schema to constrain the response shape.
+When present, the model returns a parsed object which is pretty-printed as JSON.
+
 Environment (auto-loaded from ./.env if present; existing env vars win):
   LANGCHAT_MODEL      Model name (required), e.g. gpt-4o-mini
   LANGCHAT_BASE_URL   OpenAI-compatible base URL (optional)
@@ -163,6 +166,27 @@ async function runStreamed(model, messages) {
   }
 }
 
+async function runStructured(baseModel, messages, outputSchema, { stream }) {
+  let model = baseModel;
+  let effectiveStream = stream;
+  if (stream) {
+    process.stderr.write(
+      '[langchat] warning: -s/--stream ignored: not supported with #!output structured output.\n'
+    );
+    effectiveStream = false;
+  }
+  if (effectiveStream !== baseModel.streaming) {
+    model = buildModel({
+      model: baseModel.model,
+      baseURL: baseModel.configuration?.baseURL,
+      apiKey: baseModel.apiKey,
+      stream: effectiveStream,
+    });
+  }
+  const structured = model.withStructuredOutput(outputSchema);
+  return await structured.invoke(messages);
+}
+
 async function main(argv) {
   loadDotenv();
 
@@ -205,13 +229,14 @@ async function main(argv) {
     process.exit(1);
   }
 
-  let messages;
+  let parsed;
   try {
-    messages = parseChatFile(expanded.text, expanded.attachments);
+    parsed = parseChatFile(expanded.text, expanded.attachments);
   } catch (err) {
     process.stderr.write(`langchat: failed to parse ${opts.file}: ${err.message}\n`);
     process.exit(1);
   }
+  const { messages, outputSchema } = parsed;
 
   let config;
   try {
@@ -224,7 +249,12 @@ async function main(argv) {
   const model = buildModel({ ...config, stream: opts.stream });
 
   try {
-    if (opts.stream) {
+    if (outputSchema) {
+      const result = await runStructured(model, messages, outputSchema, {
+        stream: opts.stream,
+      });
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    } else if (opts.stream) {
       await runStreamed(model, messages);
       process.stdout.write('\n');
     } else {
@@ -237,4 +267,4 @@ async function main(argv) {
   }
 }
 
-module.exports = { main, parseArgs, runOnce, runStreamed };
+module.exports = { main, parseArgs, runOnce, runStreamed, runStructured };

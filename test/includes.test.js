@@ -175,7 +175,8 @@ test('expansion integrates with the chat parser (directive inside a #!user block
     fs.readFileSync(path.join(dir, 'chat.md'), 'utf8'),
     { baseDir: dir }
   );
-  const messages = parseChatFile(expanded.text, expanded.attachments);
+  const { messages, outputSchema } = parseChatFile(expanded.text, expanded.attachments);
+  assert.equal(outputSchema, null);
   assert.equal(messages.length, 1);
   assert.equal(messages[0].content, 'Answer based on: the context');
 });
