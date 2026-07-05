@@ -1,0 +1,21 @@
+{
+  "name": "langchat",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "bin": {
+    "langchat": "bin/langchat.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "start": "node bin/langchat.js",
+    "chat": "node bin/langchat.js"
+  },
+  "dependencies": {
+    "@langchain/openai": "^1.5.3",
+    "langchain": "^1.5.2"
+  }
+}
