@@ -126,3 +126,84 @@ test('rejects non-string input', () => {
   assert.throws(() => parseChatFile(null), TypeError);
   assert.throws(() => parseChatFile(123), TypeError);
 });
+
+test('user message with one image directive becomes a content array', () => {
+  const md = `#!user\n\nLook: {{ include "a.png" }}\n`;
+  const att = [{ type: 'image', mimeType: 'image/png', data: 'AAAA', source: 'a.png' }];
+  const messages = parseChatFile(md, att);
+  assert.equal(messages.length, 1);
+  assert.ok(Array.isArray(messages[0].content));
+  assert.equal(messages[0].content.length, 2);
+  assert.equal(messages[0].content[0].type, 'text');
+  assert.equal(messages[0].content[0].text, 'Look: ');
+  assert.equal(messages[0].content[1].type, 'image');
+  assert.equal(messages[0].content[1].data, 'AAAA');
+});
+
+test('text-only user messages stay as strings when attachments exist', () => {
+  const md = `#!user\n\njust text, no directive\n#!user\n\nalso just text\n`;
+  const messages = parseChatFile(md, []);
+  assert.equal(messages.length, 2);
+  assert.equal(typeof messages[0].content, 'string');
+  assert.equal(typeof messages[1].content, 'string');
+});
+
+test('image directive in a #!system block throws with a line number', () => {
+  const md = `#!system\n\nYou see {{ include "a.png" }}\n`;
+  const att = [{ type: 'image', mimeType: 'image/png', data: 'A', source: 'a.png' }];
+  assert.throws(
+    () => parseChatFile(md, att),
+    /image include.*at line 1.*only supported.*#!user/
+  );
+});
+
+test('image directive in a #!assistant block throws', () => {
+  const md = `#!assistant\n\nI see {{ include "a.png" }}\n`;
+  const att = [{ type: 'image', mimeType: 'image/png', data: 'A', source: 'a.png' }];
+  assert.throws(
+    () => parseChatFile(md, att),
+    /image include.*at line 1.*only supported.*#!user/
+  );
+});
+
+test('throws when directives outnumber attachments', () => {
+  const md = `#!user\n\n{{ include "a.png" }} and {{ include "b.jpg" }}\n`;
+  const att = [{ type: 'image', mimeType: 'image/png', data: 'A', source: 'a.png' }];
+  assert.throws(
+    () => parseChatFile(md, att),
+    /directives exceed attachments/
+  );
+});
+
+test('throws when attachments outnumber directives', () => {
+  const md = `#!user\n\nplain text no directive\n`;
+  const att = [
+    { type: 'image', mimeType: 'image/png', data: 'A', source: 'a.png' },
+    { type: 'image', mimeType: 'image/jpeg', data: 'B', source: 'b.jpg' },
+  ];
+  assert.throws(
+    () => parseChatFile(md, att),
+    /attachment count mismatch/
+  );
+});
+
+test('multiple images in one user message preserve directive order', () => {
+  const md = `#!user\n\nfirst {{ include "a.png" }} second {{ include "b.jpg" }} end\n`;
+  const att = [
+    { type: 'image', mimeType: 'image/png', data: 'A', source: 'a.png' },
+    { type: 'image', mimeType: 'image/jpeg', data: 'B', source: 'b.jpg' },
+  ];
+  const messages = parseChatFile(md, att);
+  assert.ok(Array.isArray(messages[0].content));
+  assert.deepEqual(messages[0].content, [
+    { type: 'text', text: 'first ' },
+    { type: 'image', mimeType: 'image/png', data: 'A', source: 'a.png' },
+    { type: 'text', text: ' second ' },
+    { type: 'image', mimeType: 'image/jpeg', data: 'B', source: 'b.jpg' },
+    { type: 'text', text: ' end' },
+  ]);
+});
+
+test('rejects non-array attachments', () => {
+  assert.throws(() => parseChatFile('#!user\n\nx\n', 'not-an-array'), TypeError);
+});

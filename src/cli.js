@@ -207,7 +207,7 @@ async function main(argv) {
 
   let messages;
   try {
-    messages = parseChatFile(expanded);
+    messages = parseChatFile(expanded.text, expanded.attachments);
   } catch (err) {
     process.stderr.write(`langchat: failed to parse ${opts.file}: ${err.message}\n`);
     process.exit(1);

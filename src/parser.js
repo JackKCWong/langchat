@@ -7,6 +7,7 @@ const {
 } = require('@langchain/core/messages');
 
 const HEADER_RE = /^#!(system|user|assistant)\s*$/;
+const DIRECTIVE_RE = /\{\{\s*include\s+"([^"]+)"\s*\}\}/g;
 
 const ROLE_FACTORIES = {
   system: SystemMessage,
@@ -14,9 +15,53 @@ const ROLE_FACTORIES = {
   assistant: AIMessage,
 };
 
-function parseChatFile(text) {
+function expandUserContent(rawText, attachments, role, lineNumber, startIdx) {
+  if (!DIRECTIVE_RE.test(rawText)) {
+    DIRECTIVE_RE.lastIndex = 0;
+    return { content: rawText, nextIdx: startIdx };
+  }
+  DIRECTIVE_RE.lastIndex = 0;
+
+  if (role !== 'user') {
+    const m = rawText.match(DIRECTIVE_RE);
+    const snippet = m ? m[0] : '';
+    throw new Error(
+      `image include ${snippet} at line ${lineNumber} is only supported ` +
+        `inside a #!user block (found #!${role})`
+    );
+  }
+
+  const blocks = [];
+  let cursor = 0;
+  let idx = startIdx;
+  rawText.replace(DIRECTIVE_RE, (match, _rawPath, offset) => {
+    if (offset > cursor) {
+      blocks.push({ type: 'text', text: rawText.slice(cursor, offset) });
+    }
+    if (idx >= attachments.length) {
+      throw new Error(
+        `image include ${match} at line ${lineNumber} has no remaining ` +
+          `attachment (directives exceed attachments)`
+      );
+    }
+    blocks.push(attachments[idx]);
+    idx += 1;
+    cursor = offset + match.length;
+    return match;
+  });
+  if (cursor < rawText.length) {
+    blocks.push({ type: 'text', text: rawText.slice(cursor) });
+  }
+
+  return { content: blocks, nextIdx: idx };
+}
+
+function parseChatFile(text, attachments = []) {
   if (typeof text !== 'string') {
     throw new TypeError('parseChatFile expects a string');
+  }
+  if (!Array.isArray(attachments)) {
+    throw new TypeError('parseChatFile attachments must be an array');
   }
 
   const lines = text.split(/\r?\n/);
@@ -24,12 +69,25 @@ function parseChatFile(text) {
   let currentRole = null;
   let currentLines = [];
   let currentHeaderLine = -1;
+  let attachmentIdx = 0;
 
   const flush = () => {
     if (currentRole === null) return;
-    const content = currentLines.join('\n').replace(/^\n+|\n+$/g, '');
+    const raw = currentLines.join('\n').replace(/^\n+|\n+$/g, '');
+    const { content, nextIdx } = expandUserContent(
+      raw,
+      attachments,
+      currentRole,
+      currentHeaderLine,
+      attachmentIdx
+    );
+    attachmentIdx = nextIdx;
     const Factory = ROLE_FACTORIES[currentRole];
-    messages.push(new Factory(content));
+    if (Array.isArray(content)) {
+      messages.push(new Factory({ contentBlocks: content }));
+    } else {
+      messages.push(new Factory(content));
+    }
     currentRole = null;
     currentLines = [];
     currentHeaderLine = -1;
@@ -61,6 +119,13 @@ function parseChatFile(text) {
   });
 
   flush();
+
+  if (attachmentIdx !== attachments.length) {
+    throw new Error(
+      `attachment count mismatch: ${attachmentIdx} image directive(s) consumed ` +
+        `but ${attachments.length} attachment(s) provided`
+    );
+  }
 
   if (messages.length === 0) {
     throw new Error(
