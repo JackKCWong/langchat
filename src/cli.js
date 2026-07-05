@@ -124,11 +124,38 @@ async function runOnce(model, messages) {
     : stringifyContent(aiMessage.content);
 }
 
+function createLineWriter() {
+  let buffer = '';
+  return {
+    write(text) {
+      if (!text) return;
+      buffer += text;
+      let nl;
+      while ((nl = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 1);
+        process.stdout.write(line + '\n');
+      }
+    },
+    end() {
+      if (buffer.length > 0) {
+        process.stdout.write(buffer);
+        buffer = '';
+      }
+    },
+  };
+}
+
 async function runStreamed(model, messages) {
   const streamIter = await model.stream(messages);
-  for await (const chunk of streamIter) {
-    const piece = stringifyContent(chunk.content);
-    if (piece) process.stdout.write(piece);
+  const writer = createLineWriter();
+  try {
+    for await (const chunk of streamIter) {
+      const piece = stringifyContent(chunk.content);
+      writer.write(piece);
+    }
+  } finally {
+    writer.end();
   }
 }
 
