@@ -398,7 +398,7 @@ async function main(argv) {
 
   let expanded;
   try {
-    expanded = resolveIncludes(body, {
+    expanded = await resolveIncludes(body, {
       baseDir: path.dirname(absPath),
       allowEscape: opts.allowIncludeEscape,
     });

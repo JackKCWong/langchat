@@ -3,6 +3,14 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const {
+  PATCHIFY_DIRECTIVE_RE,
+  parsePatchifyArgs,
+  validatePatchifyArgs,
+  patchifyImage,
+  sourceLabelFor,
+} = require('./patchify.js');
+
 const DEFAULT_IMAGE_EXTENSIONS = new Set([
   '.png',
   '.jpg',
@@ -23,9 +31,11 @@ const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
 
 const DIRECTIVE_RE = /\{\{\s*include\s+"([^"]+)"\s*\}\}/g;
 
+const SYNTHETIC_INCLUDE_RE = /^\{\{\s*include\s+"([^"]+)"\s*\}\}$/;
+
 function resolveIncludes(text, opts = {}) {
   if (typeof text !== 'string') {
-    throw new TypeError('resolveIncludes expects a string');
+    return Promise.reject(new TypeError('resolveIncludes expects a string'));
   }
 
   const baseDir = path.resolve(opts.baseDir || process.cwd());
@@ -34,19 +44,10 @@ function resolveIncludes(text, opts = {}) {
   const imageExtensions = opts.imageExtensions || DEFAULT_IMAGE_EXTENSIONS;
   const imageMimeTypes = opts.imageMimeTypes || DEFAULT_IMAGE_MIME_TYPES;
   const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
-
   const stack = [];
   const attachments = [];
 
-  const recordImage = (rawPath, resolved) => {
-    let buf;
-    try {
-      buf = fs.readFileSync(resolved);
-    } catch (err) {
-      throw new Error(
-        `include failed: ${rawPath} (${resolved}): ${err.message}`
-      );
-    }
+  const recordImage = (rawPath, resolved, buf) => {
     if (buf.length > maxBytes) {
       throw new Error(
         `include "${rawPath}" (${resolved}) is ${buf.length} bytes; ` +
@@ -80,28 +81,42 @@ function resolveIncludes(text, opts = {}) {
     return content;
   };
 
-  const expand = (snippet, fileDir, depth) => {
+  const resolvePath = (rawPath, fileDir) => {
+    const resolved = path.isAbsolute(rawPath)
+      ? path.resolve(rawPath)
+      : path.resolve(fileDir, rawPath);
+    const insideBase =
+      resolved === baseDir || resolved.startsWith(baseDir + path.sep);
+    if (!insideBase && !allowEscape) {
+      throw new Error(
+        `include "${rawPath}" escapes base directory ${baseDir}`
+      );
+    }
+    if (stack.includes(resolved)) {
+      throw new Error(
+        `cyclic include detected: ${stack.join(' -> ')} -> ${resolved}`
+      );
+    }
+    return resolved;
+  };
+
+  async function expand(snippet, fileDir, depth) {
     if (depth > maxDepth) {
       throw new Error(`include depth exceeded ${maxDepth}`);
     }
-    return snippet.replace(DIRECTIVE_RE, (_match, rawPath) => {
-      const resolved = path.isAbsolute(rawPath)
-        ? path.resolve(rawPath)
-        : path.resolve(fileDir, rawPath);
 
-      const insideBase =
-        resolved === baseDir || resolved.startsWith(baseDir + path.sep);
-      if (!insideBase && !allowEscape) {
-        throw new Error(
-          `include "${rawPath}" escapes base directory ${baseDir}`
-        );
+    const out = [];
+    let cursor = 0;
+
+    DIRECTIVE_RE.lastIndex = 0;
+    let m;
+    while ((m = DIRECTIVE_RE.exec(snippet)) !== null) {
+      if (m.index > cursor) {
+        out.push(snippet.slice(cursor, m.index));
       }
 
-      if (stack.includes(resolved)) {
-        throw new Error(
-          `cyclic include detected: ${stack.join(' -> ')} -> ${resolved}`
-        );
-      }
+      const rawPath = m[1];
+      const resolved = resolvePath(rawPath, fileDir);
 
       const ext = path.extname(resolved).toLowerCase();
       const isImage = imageExtensions.has(ext);
@@ -109,24 +124,117 @@ function resolveIncludes(text, opts = {}) {
       stack.push(resolved);
       try {
         if (isImage) {
-          recordImage(rawPath, resolved);
-          return _match;
+          let buf;
+          try {
+            buf = fs.readFileSync(resolved);
+          } catch (err) {
+            throw new Error(
+              `include failed: ${rawPath} (${resolved}): ${err.message}`
+            );
+          }
+          recordImage(rawPath, resolved, buf);
+          out.push(m[0]);
+        } else {
+          const content = readText(rawPath, resolved);
+          const nested = await expand(
+            content,
+            path.dirname(resolved),
+            depth + 1
+          );
+          out.push(nested);
         }
-        const content = readText(rawPath, resolved);
-        return expand(content, path.dirname(resolved), depth + 1);
       } finally {
         stack.pop();
       }
-    });
-  };
 
-  const newText = expand(text, baseDir, 0);
-  return { text: newText, attachments };
+      cursor = m.index + m[0].length;
+    }
+
+    if (cursor < snippet.length) {
+      out.push(snippet.slice(cursor));
+    }
+
+    return await applyPatchify(out.join(''), fileDir);
+  }
+
+  async function applyPatchify(text, fileDir) {
+    const matches = [];
+    PATCHIFY_DIRECTIVE_RE.lastIndex = 0;
+    let m;
+    while ((m = PATCHIFY_DIRECTIVE_RE.exec(text)) !== null) {
+      matches.push({ offset: m.index, length: m[0].length, raw: m[0], groups: m });
+      if (m.index === PATCHIFY_DIRECTIVE_RE.lastIndex) {
+        PATCHIFY_DIRECTIVE_RE.lastIndex++;
+      }
+    }
+
+    let result = text;
+    for (let i = matches.length - 1; i >= 0; i--) {
+      const { offset, length, raw } = matches[i];
+      const args = parsePatchifyArgs(raw);
+      validatePatchifyArgs(args);
+
+      const resolved = resolvePath(args.path, fileDir);
+
+      let buf;
+      try {
+        buf = fs.readFileSync(resolved);
+      } catch (err) {
+        throw new Error(
+          `patchify failed: ${args.path} (${resolved}): ${err.message}`
+        );
+      }
+      if (buf.length > maxBytes) {
+        throw new Error(
+          `patchify "${args.path}" (${resolved}) is ${buf.length} bytes; ` +
+            `limit is ${maxBytes} bytes`
+        );
+      }
+
+      stack.push(resolved);
+      let patches;
+      try {
+        patches = await patchifyImage(buf, {
+          m: args.m,
+          n: args.n,
+          x: args.x,
+          y: args.y,
+        });
+      } finally {
+        stack.pop();
+      }
+
+      const placeholders = [];
+      for (const p of patches) {
+        const label = sourceLabelFor(args.path, p.row, p.col);
+        attachments.push({
+          type: 'image',
+          mimeType: p.mimeType,
+          data: p.patch.toString('base64'),
+          source: label,
+        });
+        placeholders.push(`{{ include "${label}" }}`);
+      }
+
+      result =
+        result.slice(0, offset) +
+        placeholders.join(' ') +
+        result.slice(offset + length);
+    }
+    return result;
+  }
+
+  return expand(text, baseDir, 0).then((finalText) => ({
+    text: finalText,
+    attachments,
+  }));
 }
 
 module.exports = {
   resolveIncludes,
   DIRECTIVE_RE,
+  PATCHIFY_DIRECTIVE_RE,
+  SYNTHETIC_INCLUDE_RE,
   DEFAULT_IMAGE_EXTENSIONS,
   DEFAULT_IMAGE_MIME_TYPES,
   DEFAULT_MAX_BYTES,
