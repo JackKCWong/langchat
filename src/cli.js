@@ -6,12 +6,14 @@ const path = require('node:path');
 const { ChatOpenAI } = require('@langchain/openai');
 
 const { parseChatFile } = require('./parser.js');
+const { resolveIncludes } = require('./includes.js');
 
 const USAGE = `Usage: langchat [options] <chat.md>
 
 Options:
-  -s, --stream   Stream the response token-by-token to stdout
-  -h, --help     Show this help and exit
+  -s, --stream               Stream the response token-by-token to stdout
+      --allow-include-escape  Permit {{ include }} paths outside the chat file's directory
+  -h, --help                 Show this help and exit
 
 Environment (auto-loaded from ./.env if present; existing env vars win):
   LANGCHAT_MODEL      Model name (required), e.g. gpt-4o-mini
@@ -35,7 +37,7 @@ function loadDotenv() {
 }
 
 function parseArgs(argv) {
-  const opts = { stream: false, file: null, help: false };
+  const opts = { stream: false, file: null, help: false, allowIncludeEscape: false };
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -43,6 +45,8 @@ function parseArgs(argv) {
       opts.help = true;
     } else if (a === '-s' || a === '--stream') {
       opts.stream = true;
+    } else if (a === '--allow-include-escape') {
+      opts.allowIncludeEscape = true;
     } else if (a === '--') {
       positional.push(...argv.slice(i + 1));
       break;
@@ -190,9 +194,20 @@ async function main(argv) {
     process.exit(1);
   }
 
+  let expanded;
+  try {
+    expanded = resolveIncludes(text, {
+      baseDir: path.dirname(absPath),
+      allowEscape: opts.allowIncludeEscape,
+    });
+  } catch (err) {
+    process.stderr.write(`langchat: ${err.message}\n`);
+    process.exit(1);
+  }
+
   let messages;
   try {
-    messages = parseChatFile(text);
+    messages = parseChatFile(expanded);
   } catch (err) {
     process.stderr.write(`langchat: failed to parse ${opts.file}: ${err.message}\n`);
     process.exit(1);

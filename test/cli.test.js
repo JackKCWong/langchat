@@ -99,3 +99,20 @@ test('stream + help: help still recognized', () => {
   assert.equal(opts.help, true);
   assert.equal(opts.stream, true);
 });
+
+test('--allow-include-escape defaults to false', () => {
+  const opts = parseArgs(['chat.md']);
+  assert.equal(opts.allowIncludeEscape, false);
+});
+
+test('--allow-include-escape sets the flag', () => {
+  const opts = parseArgs(['--allow-include-escape', 'chat.md']);
+  assert.equal(opts.allowIncludeEscape, true);
+  assert.equal(opts.file, 'chat.md');
+});
+
+test('--allow-include-escape works with -s', () => {
+  const opts = parseArgs(['-s', '--allow-include-escape', 'chat.md']);
+  assert.equal(opts.stream, true);
+  assert.equal(opts.allowIncludeEscape, true);
+});
