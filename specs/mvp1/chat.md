@@ -1,6 +1,5 @@
 ---
 model: deepseek-r1
-enable_thinking: true
 ---
 
 # !system
