@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/JackKCWong/langchat/go/internal/output"
-	"github.com/JackKCWong/langchat/go/internal/config"
-	openai "github.com/tmc/langchaingo/llms/openai"
+	"github.com/JackKCWong/langchat-go/internal/config"
+	"github.com/JackKCWong/langchat-go/internal/output"
 	"github.com/tmc/langchaingo/llms"
+	openai "github.com/tmc/langchaingo/llms/openai"
 )
 
 // RunStructured sends messages to the LLM with a JSON-schema response

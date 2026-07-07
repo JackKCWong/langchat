@@ -1,4 +1,4 @@
-module github.com/JackKCWong/langchat/go
+module github.com/JackKCWong/langchat-go
 
 go 1.26
 

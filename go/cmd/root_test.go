@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JackKCWong/langchat/go/internal/args"
+	"github.com/JackKCWong/langchat-go/internal/args"
 )
 
 // TestRunEndToEnd mocks an OpenAI-compatible /v1/chat/completions server

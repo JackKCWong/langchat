@@ -6,12 +6,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/JackKCWong/langchat/go/internal/args"
-	"github.com/JackKCWong/langchat/go/internal/chat"
-	"github.com/JackKCWong/langchat/go/internal/config"
-	"github.com/JackKCWong/langchat/go/internal/frontmatter"
-	"github.com/JackKCWong/langchat/go/internal/includes"
-	"github.com/JackKCWong/langchat/go/internal/parser"
+	"github.com/JackKCWong/langchat-go/internal/args"
+	"github.com/JackKCWong/langchat-go/internal/chat"
+	"github.com/JackKCWong/langchat-go/internal/config"
+	"github.com/JackKCWong/langchat-go/internal/frontmatter"
+	"github.com/JackKCWong/langchat-go/internal/includes"
+	"github.com/JackKCWong/langchat-go/internal/parser"
 
 	"github.com/spf13/cobra"
 	"github.com/tmc/langchaingo/llms"

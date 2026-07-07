@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JackKCWong/langchat/go/internal/config"
+	"github.com/JackKCWong/langchat-go/internal/config"
 	"github.com/tmc/langchaingo/llms"
 	openai "github.com/tmc/langchaingo/llms/openai"
 )

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/JackKCWong/langchat/go/internal/output"
-	openai "github.com/tmc/langchaingo/llms/openai"
+	"github.com/JackKCWong/langchat-go/internal/output"
 	"github.com/tmc/langchaingo/llms"
+	openai "github.com/tmc/langchaingo/llms/openai"
 )
 
 // RunChat sends messages to the LLM using streaming (the default), with

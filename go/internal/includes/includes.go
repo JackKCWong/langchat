@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/JackKCWong/langchat/go/internal/parser"
+	"github.com/JackKCWong/langchat-go/internal/parser"
 )
 
 var (
@@ -30,13 +30,13 @@ type Result struct {
 
 // Options tunes the include resolver.
 type Options struct {
-	BaseDir       string                 // absolute path; resolved against cwd if empty
-	MaxDepth      int                    // default 8
-	AllowEscape   bool                   // permit paths outside BaseDir
-	MaxBytes      int                    // default DefaultMaxBytes
-	Debug         bool                   // write tiles next to source under --debug
-	DebugWriter   io.Writer              // receives "[langchat] --debug ..." lines
-	ImageMIMEs    map[string]string      // defaults to DefaultImageExtensions
+	BaseDir       string                  // absolute path; resolved against cwd if empty
+	MaxDepth      int                     // default 8
+	AllowEscape   bool                    // permit paths outside BaseDir
+	MaxBytes      int                     // default DefaultMaxBytes
+	Debug         bool                    // write tiles next to source under --debug
+	DebugWriter   io.Writer               // receives "[langchat] --debug ..." lines
+	ImageMIMEs    map[string]string       // defaults to DefaultImageExtensions
 	OnPatchifyAny func(args PatchifyArgs) // optional callback when patchify is used (for tests)
 }
 

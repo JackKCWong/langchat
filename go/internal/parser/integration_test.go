@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JackKCWong/langchat/go/internal/frontmatter"
-	"github.com/JackKCWong/langchat/go/internal/parser"
+	"github.com/JackKCWong/langchat-go/internal/frontmatter"
+	"github.com/JackKCWong/langchat-go/internal/parser"
 	"github.com/tmc/langchaingo/llms"
 )
 

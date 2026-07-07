@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/JackKCWong/langchat/go/cmd"
+	"github.com/JackKCWong/langchat-go/cmd"
 )
 
 func main() {
